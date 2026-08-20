@@ -115,10 +115,10 @@ function makeSourcesApi(plugins) {
   return {
     // Two populations, one list (SPEC §1 has two ingest paths; the Sources view
     // used to show only the first):
-    //   kind:"reader"  — in-process readers, from `sourceState` as before, still
+    //   sourceKind: "reader"  — in-process readers, from `sourceState` as before, still
     //                    reporting { configurable, connected, account } with the
     //                    secret REDACTED via credentials.js.
-    //   kind:"emitter" — external plugins that POST to the loopback API. They
+    //   sourceKind: "emitter" — external plugins that POST to the loopback API. They
     //                    have no in-process state at all, so their evidence is
     //                    the `ingest_log` audit table; the ones that have never
     //                    delivered still get a row, marked "waiting", because a

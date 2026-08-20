@@ -37,10 +37,10 @@ export const READER_LIVE_MS = 30 * 60 * 1000;
 //               no equivalent: a batch that fails validation is rejected at the
 //               REST boundary and never becomes a delivery, so the honest thing
 //               to say about a broken emitter is "nothing arrived".
-export function healthOf({ kind = 'emitter', at = null, lastOk = null, now = Date.now() } = {}) {
-  if (kind === 'reader' && lastOk === false) return 'error';
+export function healthOf({ sourceKind = 'emitter', at = null, lastOk = null, now = Date.now() } = {}) {
+  if (sourceKind === 'reader' && lastOk === false) return 'error';
   if (at == null) return 'waiting';
-  const live = kind === 'reader' ? READER_LIVE_MS : EMITTER_LIVE_MS;
+  const live = sourceKind === 'reader' ? READER_LIVE_MS : EMITTER_LIVE_MS;
   return now - at <= live ? 'live' : 'idle';
 }
 
@@ -75,8 +75,8 @@ function namesOwnedByReader(pluginSources, reader) {
  * @param {object}   o.personCounts — db.personCountsBySource(), source → count.
  * @param {object}   o.pluginSources — ingest.PLUGIN_SOURCES (name → sources[]).
  * @param {number}   o.now — injectable clock, so health is testable.
- * @returns {object[]} readers first (kind:"reader"), then emitters
- *   (kind:"emitter") — delivering ones newest-first, then the never-seen ones.
+ * @returns {object[]} readers first (sourceKind: "reader"), then emitters
+ *   (sourceKind: "emitter") — delivering ones newest-first, then the never-seen ones.
  */
 export function mergeSourceStatus({
   readers = [],
@@ -112,7 +112,7 @@ export function mergeSourceStatus({
     }
     out.push({
       ...r,
-      kind: 'reader',
+      sourceKind: 'reader',
       sources: r.source ? [r.source] : [],
       version: d?.version ?? null,
       lastReceivedAt: d?.lastReceivedAt ?? null,
@@ -120,7 +120,7 @@ export function mergeSourceStatus({
       totalObs: d?.totalObs ?? 0,
       deliveries: d?.deliveries ?? 0,
       ageMs: r.lastRun != null ? Math.max(0, now - r.lastRun) : null,
-      health: healthOf({ kind: 'reader', at: r.lastRun ?? null, lastOk: r.lastOk ?? null, now }),
+      health: healthOf({ sourceKind: 'reader', at: r.lastRun ?? null, lastOk: r.lastOk ?? null, now }),
     });
   }
 
@@ -140,7 +140,7 @@ export function mergeSourceStatus({
     const nPersons = decl.reduce((n, s) => n + (Number(personCounts[s]) || 0), 0);
     const at = d?.lastReceivedAt ?? null;
     emitters.push({
-      kind: 'emitter',
+      sourceKind: 'emitter',
       plugin: name,
       sources: decl,
       version: d?.version ?? null,
@@ -151,7 +151,7 @@ export function mergeSourceStatus({
       totalObs: d?.totalObs ?? 0,
       deliveries: d?.deliveries ?? 0,
       connected: at != null,
-      health: healthOf({ kind: 'emitter', at, now }),
+      health: healthOf({ sourceKind: 'emitter', at, now }),
       // Kept so an emitter is shape-compatible with a reader entry for any
       // consumer that reads the old fields. An emitter is never "configurable"
       // (it is configured in its own host app) and never reports a failed run:

@@ -517,10 +517,10 @@ if (!window.orbit) {
   // -- sources ---------------------------------------------------------------
   // Two populations, exactly as the real core reports them (SPEC §1):
   //
-  //   kind:"reader"  — runs INSIDE Orbit on a timer. Steam is the one
+  //   sourceKind: "reader"  — runs INSIDE Orbit on a timer. Steam is the one
   //                    CONFIGURABLE reader (it has a Connect flow) and starts
   //                    DISCONNECTED so the walkthrough demoes.
-  //   kind:"emitter" — runs in another app and POSTs to the loopback API. Its
+  //   sourceKind: "emitter" — runs in another app and POSTs to the loopback API. Its
   //                    only evidence is the §4 ingest_log, so the mock states
   //                    what "arrived": a bridge delivering right now, a CLI that
   //                    has never been run, and one that went quiet days ago.
@@ -531,10 +531,10 @@ if (!window.orbit) {
   // the healthy bridge drift into "quiet" the moment the wall clock passed it.)
   const EMITTER_LIVE_MS = 10 * 60 * 1000; // matches src/main/sources-status.js
   const READER_LIVE_MS = 30 * 60 * 1000;
-  function healthOf(kind, at, lastOk, now) {
-    if (kind === 'reader' && lastOk === false) return 'error';
+  function healthOf(sourceKind, at, lastOk, now) {
+    if (sourceKind === 'reader' && lastOk === false) return 'error';
     if (at == null) return 'waiting';
-    return now - at <= (kind === 'reader' ? READER_LIVE_MS : EMITTER_LIVE_MS) ? 'live' : 'idle';
+    return now - at <= (sourceKind === 'reader' ? READER_LIVE_MS : EMITTER_LIVE_MS) ? 'live' : 'idle';
   }
   const countOf = (source) => FRIENDS.filter((f) => f.source === source).length;
 
@@ -796,7 +796,7 @@ if (!window.orbit) {
           const lastRun = agoMs == null ? null : now - agoMs;
           return {
             ...x,
-            kind: 'reader',
+            sourceKind: 'reader',
             sources: x.source ? [x.source] : [],
             lastRun,
             lastReceivedAt: lastRun,
@@ -809,7 +809,7 @@ if (!window.orbit) {
             const at = agoMs == null ? null : now - agoMs;
             return {
               ...x,
-              kind: 'emitter',
+              sourceKind: 'emitter',
               lastReceivedAt: at,
               ageMs: agoMs,
               connected: at != null,

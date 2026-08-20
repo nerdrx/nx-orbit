@@ -769,7 +769,7 @@ async function viewSources() {
   //              in-process state, so what we show is what actually ARRIVED.
   // An entry with no `kind` is an older core — treat it as a reader, as before.
   const readers = arr.filter((x) => x.kind !== 'emitter');
-  const emitters = arr.filter((x) => x.kind === 'emitter');
+  const emitters = arr.filter((x) => x.sourceKind === 'emitter');
   const rows =
     readers.filter((x) => x.configurable).map(connectCard).join('') +
     readers.filter((x) => !x.configurable).map(srcRow).join('');

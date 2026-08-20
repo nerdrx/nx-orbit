@@ -90,19 +90,19 @@ test('personCountsBySource counts people per source and excludes the self person
 test('healthOf covers every threshold with an injected clock', () => {
   const now = 1_000_000_000;
   // never delivered / never ran
-  assert.equal(healthOf({ kind: 'emitter', at: null, now }), 'waiting');
-  assert.equal(healthOf({ kind: 'reader', at: null, lastOk: null, now }), 'waiting');
+  assert.equal(healthOf({ sourceKind: 'emitter', at: null, now }), 'waiting');
+  assert.equal(healthOf({ sourceKind: 'reader', at: null, lastOk: null, now }), 'waiting');
   // a reader whose last run failed is an error regardless of when it ran
-  assert.equal(healthOf({ kind: 'reader', at: now - 1000, lastOk: false, now }), 'error');
-  assert.equal(healthOf({ kind: 'reader', at: null, lastOk: false, now }), 'error');
+  assert.equal(healthOf({ sourceKind: 'reader', at: now - 1000, lastOk: false, now }), 'error');
+  assert.equal(healthOf({ sourceKind: 'reader', at: null, lastOk: false, now }), 'error');
   // emitters: inside the window is live, one ms past it is idle
-  assert.equal(healthOf({ kind: 'emitter', at: now - EMITTER_LIVE_MS, now }), 'live');
-  assert.equal(healthOf({ kind: 'emitter', at: now - EMITTER_LIVE_MS - 1, now }), 'idle');
+  assert.equal(healthOf({ sourceKind: 'emitter', at: now - EMITTER_LIVE_MS, now }), 'live');
+  assert.equal(healthOf({ sourceKind: 'emitter', at: now - EMITTER_LIVE_MS - 1, now }), 'idle');
   // readers get the longer window (the scheduler only fires every 15 min)
-  assert.equal(healthOf({ kind: 'reader', at: now - 20 * MIN, lastOk: true, now }), 'live');
-  assert.equal(healthOf({ kind: 'reader', at: now - READER_LIVE_MS - 1, lastOk: true, now }), 'idle');
+  assert.equal(healthOf({ sourceKind: 'reader', at: now - 20 * MIN, lastOk: true, now }), 'live');
+  assert.equal(healthOf({ sourceKind: 'reader', at: now - READER_LIVE_MS - 1, lastOk: true, now }), 'idle');
   // an emitter has no "error": a rejected batch never becomes a delivery
-  assert.equal(healthOf({ kind: 'emitter', at: now - 5 * MIN, lastOk: false, now }), 'live');
+  assert.equal(healthOf({ sourceKind: 'emitter', at: now - 5 * MIN, lastOk: false, now }), 'live');
 });
 
 // -------------------------------------------------------------------- merge
@@ -130,7 +130,7 @@ test('status merges in-process readers with emitters known from ingest_log', () 
 
   // readers first, keeping every field the old shape carried
   const vrcx = merged.find((s) => s.plugin === 'vrcx');
-  assert.equal(vrcx.kind, 'reader');
+  assert.equal(vrcx.sourceKind, 'reader');
   assert.equal(vrcx.configurable, false);
   assert.equal(vrcx.connected, true);
   assert.equal(vrcx.nPersons, 12);
@@ -140,7 +140,7 @@ test('status merges in-process readers with emitters known from ingest_log', () 
   assert.equal(merged.indexOf(vrcx), 0);
 
   const bridge = merged.find((s) => s.plugin === 'vencord-orbit-bridge');
-  assert.equal(bridge.kind, 'emitter');
+  assert.equal(bridge.sourceKind, 'emitter');
   assert.equal(bridge.health, 'live');
   assert.equal(bridge.lastReceivedAt, NOW - 2 * MIN);
   assert.equal(bridge.ageMs, 2 * MIN);
@@ -166,7 +166,7 @@ test('known emitters that have never delivered are listed as waiting, not omitte
     pluginSources: PLUGIN_SOURCES,
     now: NOW,
   });
-  const emitters = merged.filter((s) => s.kind === 'emitter');
+  const emitters = merged.filter((s) => s.sourceKind === 'emitter');
 
   // every registry entry except manual and the reader-covered ones
   assert.deepEqual(
@@ -185,7 +185,7 @@ test('known emitters that have never delivered are listed as waiting, not omitte
   assert.equal(merged.some((s) => s.plugin === 'manual'), false);
   // steam-orbit writes the `steam` source, which the in-process reader covers —
   // it must not nag beside the Steam connect card
-  assert.equal(merged.some((s) => s.kind === 'emitter' && s.plugin === 'steam-orbit'), false);
+  assert.equal(merged.some((s) => s.sourceKind === 'emitter' && s.plugin === 'steam-orbit'), false);
 });
 
 test('a reader that covers a registry entry absorbs that entry deliveries', () => {
@@ -199,7 +199,7 @@ test('a reader that covers a registry entry absorbs that entry deliveries', () =
     now: NOW,
   });
   const steam = merged.find((s) => s.plugin === 'steam');
-  assert.equal(steam.kind, 'reader');
+  assert.equal(steam.sourceKind, 'reader');
   assert.equal(steam.lastReceivedAt, NOW - MIN);
   assert.equal(steam.version, '2.1.0');
   assert.equal(steam.totalObs, 500);
@@ -232,7 +232,7 @@ test('health across the merged list: live, idle, waiting, error', () => {
   assert.equal(h['twitter-orbit'].health, 'waiting');            // never delivered
 
   // emitters: delivering ones first (newest first), never-seen ones last
-  const emitters = merged.filter((s) => s.kind === 'emitter');
+  const emitters = merged.filter((s) => s.sourceKind === 'emitter');
   assert.equal(emitters[0].plugin, 'vencord-orbit-bridge');
   assert.equal(emitters[1].plugin, 'lastfm-orbit');
   assert.equal(emitters.at(-1).lastReceivedAt, null);
@@ -247,7 +247,7 @@ test('merge tolerates an empty world and an unknown plugin in the log', () => {
     now: NOW,
   });
   const third = merged.find((s) => s.plugin === 'some-third-party-source');
-  assert.equal(third.kind, 'emitter');
+  assert.equal(third.sourceKind, 'emitter');
   assert.equal(third.health, 'live');
   assert.deepEqual(third.sources, []);
   assert.equal(third.nPersons, 0);
