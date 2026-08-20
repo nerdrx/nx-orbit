@@ -413,6 +413,60 @@ export function logIngest({ plugin, version, receivedAt, nPersons, nObs, rejecte
   ).run(plugin, version, receivedAt, nPersons, nObs, rejected ? JSON.stringify(rejected) : null);
 }
 
+// The audit log (SPEC §4 `ingest_log`) is also the ONLY evidence that an
+// external emitter — the Vencord bridge, the CLIs — is alive: they never touch
+// this process, they just POST batches, and each accepted batch leaves a row.
+// So "is my Vencord plugin working?" is answerable as "what is the latest row
+// for plugin = vencord-orbit-bridge?".
+//
+// One grouped pass, window functions instead of a correlated subquery per
+// plugin: ROW_NUMBER picks each plugin's most recent row while COUNT/SUM over
+// the same partition give the lifetime totals, so the whole summary costs a
+// single scan. Rows with a non-null `rejected` were not deliveries and are
+// excluded. `plugin` is an optional, BOUND filter — never string-concatenated.
+const INGEST_SUMMARY_SQL = `
+  SELECT plugin, version, received_at, n_persons, n_obs, deliveries, total_obs
+    FROM (
+      SELECT plugin, version, received_at, n_persons, n_obs,
+             COUNT(*)   OVER (PARTITION BY plugin) AS deliveries,
+             SUM(COALESCE(n_obs, 0)) OVER (PARTITION BY plugin) AS total_obs,
+             ROW_NUMBER() OVER (PARTITION BY plugin ORDER BY received_at DESC, id DESC) AS rn
+        FROM ingest_log
+       WHERE rejected IS NULL
+         AND (? IS NULL OR plugin = ?)
+    )
+   WHERE rn = 1
+   ORDER BY plugin`;
+
+// → [{ plugin, version, lastReceivedAt, nPersons, nObs, deliveries, totalObs }]
+// nPersons/nObs describe the LATEST delivery; deliveries/totalObs are lifetime.
+export function ingestLogSummary({ plugin = null } = {}) {
+  return db
+    .prepare(INGEST_SUMMARY_SQL)
+    .all(plugin ?? null, plugin ?? null)
+    .map((r) => ({
+      plugin: r.plugin,
+      version: r.version,
+      lastReceivedAt: r.received_at,
+      nPersons: r.n_persons ?? 0,
+      nObs: r.n_obs ?? 0,
+      deliveries: r.deliveries ?? 0,
+      totalObs: r.total_obs ?? 0,
+    }));
+}
+
+// How many people each source currently accounts for, so the UI can say
+// "34 Discord people" for an emitter that has no in-process state to ask.
+// The reserved `self` person (§2.1) is not a friend and is never counted.
+export function personCountsBySource() {
+  const rows = db
+    .prepare('SELECT source, COUNT(*) AS n FROM person WHERE source != ? GROUP BY source')
+    .all(SELF.source);
+  const out = {};
+  for (const r of rows) out[r.source] = r.n;
+  return out;
+}
+
 // §0.5 rolling retention prune.
 export function pruneOlderThan(ts) {
   const info = db.prepare('DELETE FROM observation WHERE ts < ?').run(ts);

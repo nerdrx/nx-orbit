@@ -33,7 +33,11 @@ const orbit = {
   },
   sources: {
     status: () => call('sources.status'),
+    token: () => call('sources.token'),
     runNow: (plugin) => call('sources.runNow', plugin),
+    configure: (plugin, cfg) => call('sources.configure', plugin, cfg),
+    test: (plugin, cfg) => call('sources.test', plugin, cfg),
+    disconnect: (plugin) => call('sources.disconnect', plugin),
   },
   settings: {
     get: () => call('settings.get'),

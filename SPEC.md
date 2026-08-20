@@ -32,9 +32,16 @@ is a hard constraint the code enforces, not an aspiration.
    it does not belong in Orbit.
 2. **Local only.** The database lives on your disk. Orbit has **no server, no
    sync, no telemetry, no outbound network except**: (a) fetching a friend's
-   own avatar image from the platform CDN for display, and (b) a plugin's
-   read of its own already-local source. There is no "upload profile" path,
-   because there is no profile to upload.
+   own avatar image from the platform CDN for display, (b) a plugin's read of
+   its own already-local source, and (c) a source reading the platform **you
+   are a first-person member of, with your own credentials** — your Steam API
+   key listing your own friends, your own Mastodon token listing who you follow.
+   That last is still first-person by construction: it returns exactly what the
+   platform already shows *you*, logged in as *yourself*. There is no "upload
+   profile" path, because there is no profile to upload. Credentials you enter
+   (a Steam API key, a token) are stored in a **0600 file in `~/.config/nx-orbit/`,
+   never in `orbit.sqlite3`** (so copying your database never leaks a secret) and
+   are never sent to the renderer in full.
 3. **No inference about people.** Orbit does not run AI/ML over anyone. It does
    arithmetic on timestamps you already have (counts, histograms, "next
    birthday"). It never predicts, scores, ranks-by-desirability, infers
@@ -366,8 +373,11 @@ orbit.people.link(idA, idB)          → ok        // assert same-human (symmetr
 orbit.people.unlink(idA, idB)        → ok        // remove one asserted edge
 orbit.people.linkSuggestions(id?)    → [{ a, b, person, candidate, score, reason }]  // candidates to CONFIRM, never auto-applied
 orbit.people.forget(id)              → ok        // §0.5 hard delete, cascades
-orbit.sources.status()               → [{ plugin, lastRun, lastOk, nPersons }]
+orbit.sources.status()               → [{ plugin, lastRun, lastOk, nPersons, configurable, connected, account }]  // account/secret REDACTED
 orbit.sources.runNow(plugin)         → triggers an in-process reader
+orbit.sources.configure(plugin, cfg) → store a source's config/credentials (0600 file); { ok, connected }
+orbit.sources.test(plugin, cfg)      → dry-run validate creds WITHOUT saving → { ok, account, friendCount } | { ok:false, reason }
+orbit.sources.disconnect(plugin)     → forget a source's credentials (does not delete already-ingested people)
 orbit.settings.get() / .set(patch)   → { retentionDays, ingestPort, sources{} }
 ```
 
@@ -384,6 +394,12 @@ preload whitelists exactly these channels.
 - `src/main/digest.js` — §5 derivations. **[core]**
 - `src/main/ipc.js` + `src/main/preload.cjs` — §6 surface. **[core]**
 - `src/main/plugins/vrcx.js` — in-process VRCX reader (§8). **[vrcx]**
+- `src/main/plugins/steam.js` — in-process Steam reader, configured from the
+  Sources UI (key + steamid in the 0600 credentials file); reuses the fetch/map
+  logic the `steam-orbit` CLI also uses. The CLI stays for remote/headless use;
+  the in-process reader is the easy path. **[steam]**
+- `src/main/credentials.js` — the only reader/writer of the 0600 credentials
+  file; secrets never touch `orbit.sqlite3` or the renderer. **[core]**
 - `src/renderer/**` — UI: index.html, app.js, styles.css, tokens.css. **[ui]**
 - `src/main/ingest-server.js` — the loopback REST API (§3, `docs/REST_API.md`). **[core]**
 - `plugins/vencord-orbit-bridge/**` — Vencord userplugin emitter (TS). **[vencord]**

@@ -142,7 +142,7 @@ export const PERSONA_STATE = {
 
 // --------------------------------------------------------- steam http
 
-class SteamHttpError extends Error {
+export class SteamHttpError extends Error {
     constructor(status, body, what) {
         super(`Steam ${what} returned HTTP ${status}`);
         this.status = status;
@@ -152,7 +152,7 @@ class SteamHttpError extends Error {
 }
 
 /** GET a JSON document over https. Never logs or echoes the API key. */
-function apiGet(url, what) {
+export function apiGet(url, what) {
     return new Promise((resolve, reject) => {
         const req = httpsGet(
             url,
@@ -176,14 +176,14 @@ function apiGet(url, what) {
     });
 }
 
-function apiUrl(path, params) {
+export function apiUrl(path, params) {
     const u = new URL(API_HOST + path);
     for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
     return u.toString();
 }
 
 /** Human-readable cause for a Steam HTTP failure — the common ones are self-inflicted. */
-function explainSteamError(e) {
+export function explainSteamError(e) {
     if (!(e instanceof SteamHttpError)) return e.message;
     switch (e.status) {
         case 400:
@@ -210,7 +210,7 @@ function explainSteamError(e) {
 // --------------------------------------------------------- fetching
 
 /** Your friends list, relationship "friend" only. Returns [{steamid, friendSince}]. */
-function extractFriends(payload) {
+export function extractFriends(payload) {
     const list = Array.isArray(payload)
         ? payload
         : payload?.friendslist?.friends ?? payload?.friends ?? null;
@@ -224,7 +224,7 @@ function extractFriends(payload) {
         .filter(f => f.steamid);
 }
 
-function extractPlayers(payload) {
+export function extractPlayers(payload) {
     const list = Array.isArray(payload) ? payload : payload?.response?.players ?? payload?.players ?? null;
     return Array.isArray(list) ? list : null;
 }
@@ -235,7 +235,7 @@ export function chunk(arr, n) {
     return out;
 }
 
-async function fetchLive(key, steamid) {
+export async function fetchLive(key, steamid) {
     const friendsPayload = await apiGet(
         apiUrl("/ISteamUser/GetFriendList/v1/", { key, steamid, relationship: "friend" }),
         "GetFriendList"

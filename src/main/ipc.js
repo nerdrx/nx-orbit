@@ -23,7 +23,11 @@ export const CHANNELS = [
   'people.linkSuggestions',
   'people.forget',
   'sources.status',
+  'sources.token',
   'sources.runNow',
+  'sources.configure',
+  'sources.test',
+  'sources.disconnect',
   'settings.get',
   'settings.set',
 ];
@@ -67,7 +71,17 @@ export function register({ sources } = {}) {
   handle('people.forget', (id) => db.forgetPerson(id));
 
   handle('sources.status', () => (sources ? sources.status() : []));
+  // The loopback ingest token (SPEC §6). Pulled on demand — the operator's own
+  // secret for their own machine, shown only when they click Reveal/Copy in the
+  // Sources view. It is the one thing an external emitter cannot work without.
+  handle('sources.token', () => (sources ? sources.token() : { token: null, reason: 'no sources' }));
   handle('sources.runNow', (plugin) => (sources ? sources.runNow(plugin) : { ok: false, reason: 'no sources' }));
+  // Connect flow (SPEC §6). test = dry-run validate; configure = validate+save+run;
+  // disconnect = clear the 0600 credentials file. `cfg` carries {apiKey, steamId};
+  // the full key never comes BACK (status returns only a redacted account).
+  handle('sources.configure', (plugin, cfg) => (sources ? sources.configure(plugin, cfg) : { ok: false, reason: 'no sources' }));
+  handle('sources.test', (plugin, cfg) => (sources ? sources.test(plugin, cfg) : { ok: false, reason: 'no sources' }));
+  handle('sources.disconnect', (plugin) => (sources ? sources.disconnect(plugin) : { ok: false, reason: 'no sources' }));
 
   handle('settings.get', () => db.getSettings());
   handle('settings.set', (patch) => db.setSettings(patch ?? {}));

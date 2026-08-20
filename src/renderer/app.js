@@ -117,6 +117,24 @@ function relTime(ts) {
   return `${Math.round(h / 24)}d ago`;
 }
 function dayKey(ts) { const d = new Date(ts); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+// A DURATION, not a point in time — "no delivery in 3 days" needs the span, and
+// relTime()'s "3d ago" reads wrong inside that sentence.
+function fmtDuration(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 45) return `${Math.max(1, s)} ${s === 1 ? 'second' : 'seconds'}`;
+  const m = Math.round(s / 60);
+  if (m < 90) return `${m} ${m === 1 ? 'minute' : 'minutes'}`;
+  const h = Math.round(m / 60);
+  if (h < 36) return `${h} ${h === 1 ? 'hour' : 'hours'}`;
+  const d = Math.round(h / 24);
+  return `${d} ${d === 1 ? 'day' : 'days'}`;
+}
+// Thousands separators without Intl (DESIGN §7: the host may run any locale, and
+// a count that reads 1.204 to a German operator is a different number).
+function fmtCount(n) {
+  const v = Math.max(0, Math.round(Number(n) || 0));
+  return String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
 
 // "MM-DD" | "YYYY-MM-DD" → days until the next occurrence. Pure arithmetic on
 // a field the person already published (SPEC §0.3) — no inference, and no IPC
@@ -740,8 +758,24 @@ async function viewAdd() {
    ===================================================================== */
 async function viewSources() {
   const [list, settings] = await Promise.all([orbit.sources.status(), orbit.settings.get()]);
-  const rows = asArray(list).map(srcRow).join('');
+  const arr = asArray(list);
   const s = settings || {};
+  const port = s.ingestPort ?? 8477;
+
+  // Two populations, two sections (SPEC §1's two ingest paths):
+  //   readers  — run inside Orbit on a timer. Configurable ones (Steam) render
+  //              as a Connect card; the rest keep the compact status row.
+  //   emitters — live in another app and POST to the loopback API. They have no
+  //              in-process state, so what we show is what actually ARRIVED.
+  // An entry with no `kind` is an older core — treat it as a reader, as before.
+  const readers = arr.filter((x) => x.kind !== 'emitter');
+  const emitters = arr.filter((x) => x.kind === 'emitter');
+  const rows =
+    readers.filter((x) => x.configurable).map(connectCard).join('') +
+    readers.filter((x) => !x.configurable).map(srcRow).join('');
+  const emitterRows = emitters.map((e) => emitterRow(e, port)).join('');
+  const liveCount = emitters.filter((e) => e.health === 'live').length;
+
   return `
     <div class="view">
       <div class="view-head">
@@ -753,13 +787,26 @@ async function viewSources() {
       <div class="local-banner">${I.lock}<span><b>Local only.</b> No server, no sync, no telemetry. The database lives on your disk; the only network Orbit makes is a plugin reading its own already-local source.</span></div>
       <div class="src-list">${rows || emptyState('No sources yet', 'Enable a plugin and it will report here after its first run.')}</div>
 
+      ${emitters.length ? sectionLabel('External sources') : ''}
+      ${
+        emitters.length
+          ? `<p class="view-sub src-sub">These run in another app — a Vencord plugin inside Discord, a CLI you launch — and deliver to Orbit over the loopback API. Orbit can only tell you what arrived: ${
+              liveCount
+                ? `${liveCount} of ${emitters.length} ${liveCount === 1 ? 'is' : 'are'} delivering right now.`
+                : 'nothing has arrived recently.'
+            }</p>
+             <div class="src-list">${emitterRows}</div>`
+          : ''
+      }
+
       ${sectionLabel('Ingest')}
       <div class="card src-panel">
         <dl class="kv">
           <dt>Loopback ingest port</dt>
-          <dd><span class="mono">127.0.0.1:${esc(s.ingestPort ?? '—')}</span> <span class="hint">bound to loopback only</span></dd>
+          <dd><span class="mono">127.0.0.1:${esc(port)}</span> <span class="hint">bound to loopback only</span></dd>
+          ${tokenRow()}
           <dt>Writing a source?</dt>
-          <dd>See <a href="../../docs/PLUGIN_GUIDELINES.md">docs/PLUGIN_GUIDELINES.md</a> — the five-rule contract every plugin obeys.</dd>
+          <dd>See <span class="mono doc-path">docs/PLUGIN_GUIDELINES.md</span> — the five-rule contract every plugin obeys.</dd>
         </dl>
       </div>
 
@@ -777,20 +824,223 @@ async function viewSources() {
     </div>`;
 }
 
+const SRC_LABELS = { vrcx: 'VRCX', 'vencord-orbit-bridge': 'Vencord bridge', 'twitter-orbit': 'twitter-orbit', steam: 'Steam', manual: 'Manual (you)' };
+
+// External emitters, named the way the operator installed them — the plugin id
+// plus the platform it feeds, because "twitter-orbit" alone doesn't tell you it
+// is the thing that fills your X friends in.
+const EMITTER_LABELS = {
+  'vencord-orbit-bridge': 'Vencord bridge (Discord)',
+  'twitter-orbit': 'twitter-orbit (X)',
+  'steam-orbit': 'steam-orbit (Steam)',
+  'contacts-orbit': 'contacts-orbit (.vcf / .ics)',
+  'mastodon-orbit': 'mastodon-orbit (Mastodon)',
+  'matrix-orbit': 'matrix-orbit (Matrix)',
+  'lastfm-orbit': 'lastfm-orbit (Last.fm)',
+};
+const emitterLabel = (p) => EMITTER_LABELS[p] || SRC_LABELS[p] || p;
+
+// health → the one thing the operator actually asked: is it working?
+// The dot is the signal; the sentence says it in words, because a coloured dot
+// alone is not an answer (and not accessible either).
+const HEALTH_UI = {
+  live:    { dot: 'var(--orbit-live)', chip: 'chip ok',   chipText: 'Receiving' },
+  idle:    { dot: 'var(--amber)',      chip: 'chip warn', chipText: 'Quiet' },
+  waiting: { dot: '#6b6480',           chip: 'chip off',  chipText: 'Waiting' },
+  error:   { dot: 'var(--danger)',     chip: 'chip warn', chipText: 'Failing' },
+};
+const healthUi = (h) => HEALTH_UI[h] || HEALTH_UI.waiting;
+
 function srcRow(s) {
-  const dot = s.lastOk ? '#00e5ff' : '#ff5470';
-  const stateChip = s.lastOk ? '<span class="chip ok"><span class="cdot"></span>OK</span>' : '<span class="chip warn">Last run failed</span>';
-  const label = { vrcx: 'VRCX', 'vencord-orbit-bridge': 'Vencord bridge', 'twitter-orbit': 'twitter-orbit', manual: 'Manual (you)' }[s.plugin] || s.plugin;
+  const ui = healthUi(s.health ?? (s.lastOk === false ? 'error' : s.lastRun ? 'live' : 'waiting'));
+  const stateChip =
+    s.health === 'error' || s.lastOk === false
+      ? '<span class="chip warn">Last run failed</span>'
+      : s.lastOk
+        ? '<span class="chip ok"><span class="cdot"></span>OK</span>'
+        : '<span class="chip off">Not run yet</span>';
+  const label = SRC_LABELS[s.plugin] || s.plugin;
   const n = s.nPersons ?? 0;
   return `
     <div class="card src-row">
-      <span class="src-ico">${I.sources}<span class="sdot" style="background:${dot}"></span></span>
+      <span class="src-ico">${I.sources}<span class="sdot" style="background:${ui.dot}"></span></span>
       <div class="src-body">
         <b>${esc(label)}</b>
-        <div class="src-meta">${n} ${n === 1 ? 'person' : 'people'} · last run ${s.lastRun ? esc(relTime(s.lastRun)) : 'never'}</div>
+        <div class="src-meta">${fmtCount(n)} ${n === 1 ? 'person' : 'people'} · last run ${s.lastRun ? esc(relTime(s.lastRun)) : 'never'}</div>
       </div>
       ${stateChip}
       <button class="btn sm" data-run="${esc(s.plugin)}">Run now</button>
+    </div>`;
+}
+
+// One external emitter. The answer to "is my Vencord plugin working?" is the
+// second line: it is a fact about deliveries that actually landed in the §4
+// audit log, not a guess, and when nothing has landed it says so and says what
+// to check. Nothing here is data about a person — plugin name, version, counts.
+function emitterRow(e, port) {
+  const health = e.health || (e.lastReceivedAt ? 'live' : 'waiting');
+  const ui = healthUi(health);
+  const age = e.ageMs != null ? fmtDuration(e.ageMs) : null;
+
+  let state;
+  if (health === 'live') state = `Receiving · last delivery ${esc(age ?? 'just now')} ago`;
+  else if (health === 'idle') state = `No delivery in ${esc(age ?? 'a while')}`;
+  else state = 'Waiting for first delivery';
+
+  const n = e.nPersons ?? 0;
+  const obs = e.totalObs ?? e.nObs ?? 0;
+  const counts =
+    health === 'waiting'
+      ? 'Nothing delivered yet'
+      : `${fmtCount(n)} ${n === 1 ? 'person' : 'people'} · ${fmtCount(obs)} ${obs === 1 ? 'observation' : 'observations'}`;
+  const meta = [counts];
+  if (e.deliveries) meta.push(`${fmtCount(e.deliveries)} ${e.deliveries === 1 ? 'batch' : 'batches'}`);
+  if (e.version) meta.push(`<span class="src-ver mono">v${esc(e.version)}</span>`);
+  const metaLine = meta.join('<span class="src-dot-sep">·</span>');
+
+  return `
+    <div class="card src-row emitter-row" data-emitter="${esc(e.plugin)}">
+      <span class="src-ico">${I.sources}<span class="sdot" style="background:${ui.dot}"></span></span>
+      <div class="src-body">
+        <b>${esc(emitterLabel(e.plugin))}</b>
+        <div class="src-state ${esc(health)}">${state}</div>
+        <div class="src-meta">${metaLine}</div>
+        ${health === 'waiting' ? emitterHint(e.plugin, port) : ''}
+      </div>
+      <span class="${ui.chip}">${health === 'live' ? '<span class="cdot"></span>' : ''}${esc(ui.chipText)}</span>
+    </div>`;
+}
+
+// What to check when an emitter has never delivered. Specific where we can be:
+// the Vencord bridge fails, almost always, because the token was never pasted
+// or Discord was only reloaded, not restarted. Docs are LOCAL files — rendered
+// as paths, not links, because this window must never navigate away from the app.
+function emitterHint(plugin, port) {
+  const docs = (paths) =>
+    `<span class="src-docs">See ${paths.map((p) => `<span class="mono doc-path">${esc(p)}</span>`).join(' and ')}.</span>`;
+
+  if (plugin === 'vencord-orbit-bridge') {
+    return `<div class="src-hint">${I.info}<span>Install the plugin, paste the ingest token from below into its <b>ingestToken</b> setting, and <b>fully restart Discord</b> — a Ctrl+R reload keeps the old settings. Leave <b>ingestPort</b> at <span class="mono">${esc(port)}</span>. ${docs(['docs/VENCORD_SOURCE.md', 'docs/REST_API.md'])}</span></div>`;
+  }
+  return `<div class="src-hint">${I.info}<span>Run it once — <span class="mono">node plugins/${esc(plugin)}/index.js</span>. It reads the token file itself and POSTs to <span class="mono">127.0.0.1:${esc(port)}</span>; this row fills in the moment a batch lands. ${docs(['docs/REST_API.md'])}</span></div>`;
+}
+
+// The ingest token: masked by default, revealed only on an explicit click, and
+// copyable in one action. An emitter without it is silently dead, so hiding the
+// token behind a terminal command was the actual bug in the setup story. It is
+// the operator's own bearer token for their own loopback server — but it is
+// still a secret, so it is never painted on screen unasked, and re-masks itself.
+const TOKEN_MASK = '••••••••••••••••••••••••';
+// A revealed token re-masks itself, so walking away from the Sources view does
+// not leave a bearer token on screen.
+const TOKEN_REVEAL_MS = 30000;
+let tokenHideTimer = null;
+
+// navigator.clipboard needs a secure context; a file:// Electron page qualifies
+// in Chromium, but a plain browser opening the mock may not — fall back to the
+// execCommand path, and let the caller reveal the token if even that fails.
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return true;
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  ta.remove();
+  if (!ok) throw new Error('the clipboard is not available');
+  return true;
+}
+
+function tokenRow() {
+  if (typeof orbit.sources.token !== 'function') {
+    return `
+      <dt>Ingest token</dt>
+      <dd><span class="hint">This core build doesn’t expose the token yet — read it from <span class="mono">~/.config/nx-orbit/ingest.token</span>.</span></dd>`;
+  }
+  return `
+    <dt>Ingest token</dt>
+    <dd>
+      <div class="tok-row">
+        <code class="mono tok-value" data-token-value aria-live="polite">${TOKEN_MASK}</code>
+        <button class="btn sm" data-token-reveal aria-expanded="false">Reveal</button>
+        <button class="btn sm primary" data-token-copy>Copy</button>
+      </div>
+      <span class="hint">External emitters authenticate with this. It never leaves this machine — paste it into the plugin, not into a website.</span>
+    </dd>`;
+}
+
+// A configurable source (Steam) — an in-app Connect card so a non-technical
+// operator never has to touch a terminal (SPEC §6, the whole point of the task).
+// Two states: not connected → a friendly numbered walkthrough with fields, Test
+// and Connect; connected → account, friends synced, Sync now, Disconnect.
+function connectCard(s) {
+  const label = SRC_LABELS[s.plugin] || s.plugin;
+  const n = s.nPersons ?? 0;
+  const privacy = `<p class="cc-privacy">${I.lock}<span>Your API key and friend data stay on this machine. Orbit only ever talks to Steam’s official API — nothing is uploaded.</span></p>`;
+
+  if (s.connected) {
+    return `
+    <div class="card connect-card is-connected" data-connect="${esc(s.plugin)}">
+      <div class="cc-head">
+        <span class="src-ico">${I.sources}<span class="sdot" style="background:#00e5ff"></span></span>
+        <div class="cc-title">
+          <b>${esc(label)}</b>
+          <span class="chip ok"><span class="cdot"></span>Connected</span>
+        </div>
+      </div>
+      <p class="cc-connected-line">Connected as <b>${esc(safeName(s.account || 'your account', 40))}</b> — syncing ${n} ${n === 1 ? 'friend' : 'friends'}.</p>
+      <div class="cc-meta">Last sync ${s.lastRun ? esc(relTime(s.lastRun)) : 'not yet — syncing shortly'}.</div>
+      ${privacy}
+      <div class="cc-actions">
+        <button class="btn sm" data-run="${esc(s.plugin)}">Sync now</button>
+        <button class="btn sm danger" data-steam-disconnect="${esc(s.plugin)}">Disconnect</button>
+      </div>
+    </div>`;
+  }
+
+  return `
+    <div class="card connect-card" data-connect="${esc(s.plugin)}">
+      <div class="cc-head">
+        <span class="src-ico">${I.sources}<span class="sdot" style="background:#6b6480"></span></span>
+        <div class="cc-title">
+          <b>${esc(label)}</b>
+          <span class="chip off">Not connected</span>
+        </div>
+      </div>
+      <p class="cc-lead">Add your Steam friends the easy way — no terminal. It takes about a minute.</p>
+      <ol class="cc-steps">
+        <li>
+          <span class="cc-step-t">Get your free Steam key</span>
+          <span class="cc-step-d">Open <span class="mono cc-url">https://steamcommunity.com/dev/apikey</span> in your browser and sign in. When Steam asks for a domain name you can type anything — <span class="mono">localhost</span> is fine. It’s instant and free. Copy the key it shows you.</span>
+        </li>
+        <li>
+          <span class="cc-step-t">Paste it below</span>
+          <div class="field cc-field">
+            <label for="steam-key">Steam API key</label>
+            <input type="password" id="steam-key" placeholder="paste your key" autocomplete="off" autocapitalize="off" spellcheck="false" />
+          </div>
+        </li>
+        <li>
+          <span class="cc-step-t">Point us at your profile</span>
+          <div class="field cc-field">
+            <label for="steam-profile">Your Steam profile</label>
+            <input type="text" id="steam-profile" placeholder="paste your profile link" autocomplete="off" autocapitalize="off" spellcheck="false" />
+            <span class="cc-hint">A profile URL, a vanity name, or your 17-digit SteamID64 all work.</span>
+          </div>
+        </li>
+      </ol>
+      <div class="cc-result" id="steam-test-result" aria-live="polite"></div>
+      ${privacy}
+      <div class="cc-actions">
+        <button class="btn sm" data-steam-test="${esc(s.plugin)}">Test connection</button>
+        <button class="btn sm primary" data-steam-connect="${esc(s.plugin)}">Connect</button>
+      </div>
     </div>`;
 }
 
@@ -1224,6 +1474,9 @@ let renderedView = null;
 async function render() {
   const token = ++renderToken;
   const fn = VIEWS[current] || viewNow;
+  // A repaint destroys the node a revealed ingest token lives in; drop its
+  // re-mask timer with it rather than firing at a detached element.
+  if (tokenHideTimer) { clearTimeout(tokenHideTimer); tokenHideTimer = null; }
   // Re-rendering the SAME view (picked a friend, loaded another page of
   // changes) must not throw you back to the top of a long list.
   const keepScroll = renderedView === current ? main.scrollTop : 0;
@@ -1374,6 +1627,137 @@ function wireView() {
         }
       }),
     );
+    // --- Steam Connect flow ---------------------------------------------------
+    const readSteamCfg = () => ({
+      apiKey: ($('#steam-key', main)?.value ?? '').trim(),
+      steamId: ($('#steam-profile', main)?.value ?? '').trim(),
+    });
+    const resultBox = () => $('#steam-test-result', main);
+    const showResult = (kind, html) => {
+      const box = resultBox();
+      if (box) { box.className = `cc-result ${kind}`; box.innerHTML = html; }
+    };
+    const spinner = '<span class="spinner" aria-hidden="true"></span>';
+
+    const testBtn = $('[data-steam-test]', main);
+    if (testBtn) testBtn.addEventListener('click', async () => {
+      const cfg = readSteamCfg();
+      if (!cfg.apiKey || !cfg.steamId) { showResult('warn', 'Fill in both your API key and your profile first.'); return; }
+      testBtn.disabled = true;
+      showResult('busy', `${spinner}Checking with Steam…`);
+      try {
+        const res = await orbit.sources.test('steam', cfg);
+        if (res && res.ok) {
+          const nm = safeName(res.account || 'your account', 40);
+          showResult('ok', `✓ Connected as <b>${esc(nm)}</b> — ${res.friendCount} ${res.friendCount === 1 ? 'friend' : 'friends'}. Click <b>Connect</b> to start syncing.`);
+        } else {
+          showResult('warn', esc(res?.reason || 'Steam did not accept that. Double-check your key and profile.'));
+        }
+      } catch (err) {
+        showResult('warn', esc(`Could not reach the core — ${err?.message || 'no answer.'}`));
+      } finally {
+        testBtn.disabled = false;
+      }
+    });
+
+    const connectBtn = $('[data-steam-connect]', main);
+    if (connectBtn) connectBtn.addEventListener('click', async () => {
+      const cfg = readSteamCfg();
+      if (!cfg.apiKey || !cfg.steamId) { showResult('warn', 'Fill in both your API key and your profile first.'); return; }
+      connectBtn.disabled = true;
+      if (testBtn) testBtn.disabled = true;
+      showResult('busy', `${spinner}Connecting…`);
+      try {
+        const res = await orbit.sources.configure('steam', cfg);
+        if (res && res.ok) {
+          const nm = safeName(res.account || 'your account', 28);
+          toast(`Connected to Steam as ${nm}. Syncing your friends now.`, 'ok');
+          render(); // card flips to the connected state
+        } else {
+          showResult('warn', esc(res?.reason || 'Steam did not accept that.'));
+          connectBtn.disabled = false;
+          if (testBtn) testBtn.disabled = false;
+        }
+      } catch (err) {
+        showResult('warn', esc(`Could not connect — ${err?.message || 'the core did not answer.'}`));
+        connectBtn.disabled = false;
+        if (testBtn) testBtn.disabled = false;
+      }
+    });
+
+    const disconnectBtn = $('[data-steam-disconnect]', main);
+    if (disconnectBtn) disconnectBtn.addEventListener('click', async () => {
+      disconnectBtn.disabled = true;
+      try {
+        const res = await orbit.sources.disconnect('steam');
+        toast(res?.note || 'Steam disconnected. Already-synced people are kept.', 'ok');
+        render();
+      } catch (err) {
+        disconnectBtn.disabled = false;
+        toast(`Could not disconnect — ${err?.message || 'the core did not answer.'}`, 'danger');
+      }
+    });
+
+    // --- ingest token: reveal / copy ----------------------------------------
+    // Fetched on demand, never at render: the token only exists in this window
+    // while the operator is looking at it, and it re-masks itself so it can't be
+    // left on screen (or in a screenshot of the Sources view).
+    const tokEl = $('[data-token-value]', main);
+    const revealBtn = $('[data-token-reveal]', main);
+    const copyBtn = $('[data-token-copy]', main);
+
+    const fetchToken = async () => {
+      const res = await orbit.sources.token();
+      const t = res && typeof res.token === 'string' ? res.token : null;
+      if (!t) throw new Error(res?.reason || 'the core did not return a token');
+      return t;
+    };
+    const mask = () => {
+      if (tokenHideTimer) { clearTimeout(tokenHideTimer); tokenHideTimer = null; }
+      if (tokEl) tokEl.textContent = TOKEN_MASK;
+      if (revealBtn) { revealBtn.textContent = 'Reveal'; revealBtn.setAttribute('aria-expanded', 'false'); }
+    };
+
+    if (revealBtn) revealBtn.addEventListener('click', async () => {
+      if (revealBtn.getAttribute('aria-expanded') === 'true') { mask(); return; }
+      revealBtn.disabled = true;
+      try {
+        const t = await fetchToken();
+        if (tokEl) tokEl.textContent = t;
+        revealBtn.textContent = 'Hide';
+        revealBtn.setAttribute('aria-expanded', 'true');
+        if (tokenHideTimer) clearTimeout(tokenHideTimer);
+        tokenHideTimer = setTimeout(mask, TOKEN_REVEAL_MS);
+      } catch (err) {
+        toast(`Could not read the ingest token — ${err?.message || 'the core did not answer.'}`, 'danger');
+      } finally {
+        revealBtn.disabled = false;
+      }
+    });
+
+    if (copyBtn) copyBtn.addEventListener('click', async () => {
+      copyBtn.disabled = true;
+      try {
+        const t = await fetchToken();
+        await copyText(t);
+        toast('Ingest token copied. Paste it into your plugin’s settings — it stays on this machine.', 'ok');
+      } catch (err) {
+        // If the clipboard is unavailable, showing the token beats a dead end.
+        try {
+          const t = await fetchToken();
+          if (tokEl) tokEl.textContent = t;
+          if (revealBtn) { revealBtn.textContent = 'Hide'; revealBtn.setAttribute('aria-expanded', 'true'); }
+          if (tokenHideTimer) clearTimeout(tokenHideTimer);
+          tokenHideTimer = setTimeout(mask, TOKEN_REVEAL_MS);
+          toast('Could not reach the clipboard — the token is shown above, select and copy it.', 'warn');
+        } catch {
+          toast(`Could not read the ingest token — ${err?.message || 'the core did not answer.'}`, 'danger');
+        }
+      } finally {
+        copyBtn.disabled = false;
+      }
+    });
+
     const save = $('[data-save-retention]', main);
     if (save) save.addEventListener('click', async () => {
       const v = Math.max(7, Math.min(3650, parseInt($('#set-retention', main).value, 10) || 365));

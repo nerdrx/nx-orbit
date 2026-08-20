@@ -362,6 +362,10 @@ body.sky-parked .neb { animation-play-state: paused; }
 .chip.live .cdot { width: 6px; height: 6px; border-radius: 50%; background: var(--orbit-live); box-shadow: 0 0 8px 1px rgba(0,229,255,0.8); }
 .chip.warn { color: var(--amber); }
 .chip.ok { color: var(--orbit-live); }
+/* The OK/Receiving chip carries the same lit dot as .chip.live — it was markup
+   with no rule behind it, so the dot rendered at zero size and the chip read as
+   a bare word. */
+.chip.ok .cdot { width: 6px; height: 6px; border-radius: 50%; background: var(--orbit-live); box-shadow: 0 0 8px 1px rgba(0,229,255,0.8); }
 .chip.off { color: var(--muted); opacity: 0.75; }
 
 /* source provenance badge — muted, never competes with violet */
@@ -891,6 +895,44 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.5; }
 .src-row .src-body b { font-size: 14px; font-weight: 640; }
 .src-row .src-body .src-meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
 .src-panel { max-width: 720px; padding: var(--sp-3); margin-top: var(--sp-2); }
+.src-sub { max-width: 720px; margin: 0 0 var(--sp-2); }
+
+/* ------------------------------------------- external emitters (§1 path 2) */
+/* Same card language as the Steam connect card — this is the other half of the
+   same question ("is this source actually feeding me?"), so it must not look
+   like a different app. The row grows a state line and, when nothing has ever
+   arrived, an inline what-to-check hint. */
+.emitter-row { align-items: flex-start; }
+.emitter-row .src-ico { margin-top: 2px; }
+.emitter-row .chip { flex: 0 0 auto; margin-top: 2px; }
+.src-state { font-size: 12.5px; margin-top: 4px; font-weight: 560; color: var(--muted); }
+.src-state.live { color: var(--orbit-live); }
+.src-state.idle { color: var(--amber); }
+.src-state.error { color: var(--danger); }
+.src-state.waiting { color: var(--muted); }
+.src-row .src-body .src-meta .src-dot-sep { margin: 0 6px; opacity: 0.6; }
+.src-ver { font-size: 11px; color: var(--muted); opacity: 0.8; }
+.src-hint {
+  display: flex; gap: 8px; align-items: flex-start; margin-top: 10px;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  background: var(--well); box-shadow: inset 0 0 0 1px rgba(154,60,255,0.22);
+  font-size: 12.5px; line-height: 1.55; color: var(--muted);
+}
+.src-hint svg { width: 15px; height: 15px; flex: 0 0 auto; margin-top: 2px; opacity: 0.85; color: var(--violet-soft); }
+.src-hint b { color: var(--text); font-weight: 640; }
+.src-docs { display: block; margin-top: 6px; }
+.doc-path { color: var(--violet-soft); font-size: 12px; word-break: break-all; }
+
+/* ------------------------------------------------------------ ingest token */
+.tok-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tok-value {
+  flex: 1 1 260px; min-width: 0; padding: 6px 10px;
+  border-radius: var(--radius-sm); background: var(--well-deep);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.07);
+  font-size: 12px; letter-spacing: 0.02em; color: var(--text);
+  overflow-wrap: anywhere; user-select: all;
+}
+.tok-row ~ .hint { display: block; margin-top: 6px; }
 .kv { display: grid; grid-template-columns: 160px 1fr; gap: 10px 16px; align-items: center; }
 .kv dt { font-size: 12.5px; color: var(--muted); }
 .kv dd { margin: 0; font-size: 13.5px; }
@@ -902,6 +944,52 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.5; }
   font-size: 13px; color: var(--text); margin-bottom: var(--sp-2);
 }
 .local-banner svg { width: 18px; height: 18px; flex: 0 0 auto; color: var(--orbit-live); }
+
+/* --------------------------------------------------- connect card (Steam) */
+.connect-card { max-width: 720px; padding: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-2); }
+.cc-head { display: flex; align-items: center; gap: var(--sp-2); }
+.cc-head .src-ico { width: 40px; height: 40px; flex: 0 0 auto; border-radius: var(--radius-sm); display: inline-flex; align-items: center; justify-content: center; background: var(--well); position: relative; }
+.cc-head .src-ico .sdot { position: absolute; right: -2px; top: -2px; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--bg-bottom); }
+.cc-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cc-title b { font-size: 15px; font-weight: 660; }
+.cc-lead { font-size: 13px; color: var(--muted); margin: 0; }
+.cc-connected-line { font-size: 14px; margin: 0; }
+.cc-meta { font-size: 12px; color: var(--muted); }
+
+.cc-steps { list-style: none; counter-reset: cc; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.cc-steps > li { counter-increment: cc; position: relative; padding-left: 34px; display: flex; flex-direction: column; gap: 6px; }
+.cc-steps > li::before {
+  content: counter(cc); position: absolute; left: 0; top: 0;
+  width: 22px; height: 22px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; color: var(--text);
+  background: var(--glass-chip); box-shadow: inset 0 0 0 1px rgba(154,60,255,0.4);
+}
+.cc-step-t { font-size: 13px; font-weight: 640; }
+.cc-step-d { font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+.cc-url { font-size: 12px; word-break: break-all; color: var(--violet-soft); }
+.cc-field { max-width: 420px; }
+.cc-hint { font-size: 11.5px; color: var(--muted); }
+
+.cc-privacy { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--muted); margin: 0; line-height: 1.5; }
+.cc-privacy svg { width: 15px; height: 15px; flex: 0 0 auto; margin-top: 1px; opacity: 0.8; }
+
+.cc-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+.cc-result { font-size: 13px; line-height: 1.55; border-radius: var(--radius-sm); padding: 0; }
+.cc-result:empty { display: none; }
+.cc-result:not(:empty) { padding: 10px 12px; }
+.cc-result.ok { color: var(--orbit-live); background: rgba(0,229,255,0.08); border: 1px solid rgba(0,229,255,0.18); }
+.cc-result.warn { color: var(--amber); background: rgba(255,179,0,0.07); border: 1px solid rgba(255,179,0,0.2); }
+.cc-result.busy { color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.cc-result b { color: var(--text); }
+
+.spinner {
+  width: 14px; height: 14px; flex: 0 0 auto; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.18); border-top-color: var(--violet-soft);
+  animation: cc-spin 0.7s linear infinite;
+}
+@keyframes cc-spin { to { transform: rotate(360deg); } }
 
 /* ================================================= person sheet (tier 2) */
 .scrim {

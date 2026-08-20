@@ -515,12 +515,69 @@ if (!window.orbit) {
   }
 
   // -- sources ---------------------------------------------------------------
-  const sources = [
-    { plugin: 'vrcx', lastRun: NOW - 6 * 60000, lastOk: true, nPersons: FRIENDS.filter((f) => f.source === 'vrcx').length },
-    { plugin: 'vencord-orbit-bridge', lastRun: NOW - 41 * 60000, lastOk: true, nPersons: FRIENDS.filter((f) => f.source === 'discord').length },
-    { plugin: 'twitter-orbit', lastRun: NOW - 3 * HOUR, lastOk: false, nPersons: FRIENDS.filter((f) => f.source === 'twitter').length },
-    { plugin: 'manual', lastRun: NOW - 2 * DAY, lastOk: true, nPersons: 0 },
+  // Two populations, exactly as the real core reports them (SPEC §1):
+  //
+  //   kind:"reader"  — runs INSIDE Orbit on a timer. Steam is the one
+  //                    CONFIGURABLE reader (it has a Connect flow) and starts
+  //                    DISCONNECTED so the walkthrough demoes.
+  //   kind:"emitter" — runs in another app and POSTs to the loopback API. Its
+  //                    only evidence is the §4 ingest_log, so the mock states
+  //                    what "arrived": a bridge delivering right now, a CLI that
+  //                    has never been run, and one that went quiet days ago.
+  //
+  // Health is derived at call time, never baked in — and from an AGE, not from
+  // the frozen scene clock, so "delivered 2 minutes ago" stays 2 minutes ago
+  // however long after `NOW` the demo is opened. (A fixed timestamp here made
+  // the healthy bridge drift into "quiet" the moment the wall clock passed it.)
+  const EMITTER_LIVE_MS = 10 * 60 * 1000; // matches src/main/sources-status.js
+  const READER_LIVE_MS = 30 * 60 * 1000;
+  function healthOf(kind, at, lastOk, now) {
+    if (kind === 'reader' && lastOk === false) return 'error';
+    if (at == null) return 'waiting';
+    return now - at <= (kind === 'reader' ? READER_LIVE_MS : EMITTER_LIVE_MS) ? 'live' : 'idle';
+  }
+  const countOf = (source) => FRIENDS.filter((f) => f.source === source).length;
+
+  // agoMs = how long ago it last ran/delivered; null = never.
+  const readers = [
+    { plugin: 'vrcx', source: 'vrcx', agoMs: 6 * 60000, lastOk: true, nPersons: countOf('vrcx'), configurable: false, connected: true, account: null, version: '1.0.0', deliveries: 812, nObs: 34, totalObs: 61240 },
+    { plugin: 'steam', source: 'steam', agoMs: null, lastOk: null, nPersons: countOf('steam'), configurable: true, connected: false, account: null, version: null, deliveries: 0, nObs: 0, totalObs: 0 },
   ];
+
+  const emitters = [
+    // Working: the Vencord bridge flushes every 30s, so a live one is minutes old.
+    { plugin: 'vencord-orbit-bridge', sources: ['discord'], version: '1.0.0', agoMs: 2 * 60000, nPersons: countOf('discord'), nObs: 17, totalObs: 12408, deliveries: 2841 },
+    // Went quiet: delivered for months, nothing for three days.
+    { plugin: 'lastfm-orbit', sources: ['lastfm'], version: '1.0.0', agoMs: 3 * DAY, nPersons: 6, nObs: 96, totalObs: 3120, deliveries: 154 },
+    // Never installed: the "waiting for first delivery" rows, with their hints.
+    { plugin: 'twitter-orbit', sources: ['twitter'], version: null, agoMs: null, nPersons: countOf('twitter'), nObs: 0, totalObs: 0, deliveries: 0 },
+    { plugin: 'contacts-orbit', sources: ['contacts'], version: null, agoMs: null, nPersons: 0, nObs: 0, totalObs: 0, deliveries: 0 },
+  ];
+
+  // A fake token — 64 hex chars like a real randomBytes(32), but a constant, so
+  // nothing here could ever be mistaken for a live credential.
+  const MOCK_TOKEN = 'deadbeef'.repeat(8);
+
+  // Fake credential state for the Steam Connect flow. No real key, no real data:
+  // `test` "succeeds" for any non-empty key + profile, `configure` flips it on.
+  let steamCred = null; // { account, steamId, friendCount } once connected
+  function steamValidate(cfg) {
+    const apiKey = String((cfg && cfg.apiKey) || '').trim();
+    const profile = String((cfg && cfg.steamId) || '').trim();
+    if (!apiKey) return { ok: false, reason: 'Enter your Steam Web API key first.' };
+    if (!profile) return { ok: false, reason: 'Paste your Steam profile link (or your SteamID64).' };
+    // Let a demo-er see the actionable private-list error on purpose.
+    if (/private/i.test(profile)) {
+      return {
+        ok: false,
+        reason:
+          'Steam did not return your friends list. Steam only shares it when your own ' +
+          '"My Friends List" privacy is set to Public. Fix it here, then test again: ' +
+          'Steam → Profile → Edit Profile → Privacy Settings → My Friends List → Public.',
+      };
+    }
+    return { ok: true, account: 'nova_navigator', friendCount: 128, steamId: '76561198000000042' };
+  }
 
   let settings = {
     retentionDays: 365,
@@ -718,22 +775,99 @@ if (!window.orbit) {
         GRIDS.set(pub.id, personGrid(raw));
         aggCache = null;
         TIMELINES.set(pub.id, [{ kind: 'friend', ts: NOW, source: 'manual', sourceId, meta: { became: true, manual: true } }]);
-        const m = sources.find((s) => s.plugin === 'manual');
-        if (m) m.nPersons += 1;
+        // No source row to bump: `manual` is the in-app CRM path, not a reader
+        // and not an emitter, so it never appears in sources.status() — exactly
+        // as the real core reports it (only loaded plugin modules have state).
         return clone(pub);
       },
     },
     sources: {
+      // Readers first, then emitters newest-delivery-first with the
+      // never-delivered ones last — the same merge the core does.
       status() {
-        return clone(sources);
+        // Reflect the live Steam credential state into its row.
+        const steam = readers.find((x) => x.plugin === 'steam');
+        if (steam) {
+          steam.connected = !!steamCred;
+          steam.account = steamCred ? steamCred.account : null;
+        }
+        const now = Date.now();
+        const r = readers.map(({ agoMs, ...x }) => {
+          const lastRun = agoMs == null ? null : now - agoMs;
+          return {
+            ...x,
+            kind: 'reader',
+            sources: x.source ? [x.source] : [],
+            lastRun,
+            lastReceivedAt: lastRun,
+            ageMs: agoMs,
+            health: healthOf('reader', lastRun, x.lastOk, now),
+          };
+        });
+        const e = emitters
+          .map(({ agoMs, ...x }) => {
+            const at = agoMs == null ? null : now - agoMs;
+            return {
+              ...x,
+              kind: 'emitter',
+              lastReceivedAt: at,
+              ageMs: agoMs,
+              connected: at != null,
+              health: healthOf('emitter', at, null, now),
+              configurable: false,
+              account: null,
+              lastRun: at,
+              lastOk: at != null ? true : null,
+            };
+          })
+          .sort((a, b) => {
+            if ((a.lastReceivedAt == null) !== (b.lastReceivedAt == null)) return a.lastReceivedAt == null ? 1 : -1;
+            if (a.lastReceivedAt !== b.lastReceivedAt) return (b.lastReceivedAt ?? 0) - (a.lastReceivedAt ?? 0);
+            return a.plugin.localeCompare(b.plugin);
+          });
+        return clone(r.concat(e));
+      },
+      // The loopback bearer token, on explicit request (SPEC §6). Fake, constant.
+      token() {
+        return { token: MOCK_TOKEN };
       },
       runNow(plugin) {
-        const s = sources.find((x) => x.plugin === plugin);
+        const s = readers.find((x) => x.plugin === plugin);
         if (s) {
-          s.lastRun = Date.now();
+          s.agoMs = 0; // "just ran"
           s.lastOk = true;
         }
         return { ok: true };
+      },
+      // Dry-run validate WITHOUT saving (SPEC §6 sources.test).
+      test(plugin, cfg) {
+        if (plugin !== 'steam') return { ok: false, reason: `"${plugin}" is not configurable` };
+        return steamValidate(cfg);
+      },
+      // Validate + save + (pretend to) kick a run (SPEC §6 sources.configure).
+      configure(plugin, cfg) {
+        if (plugin !== 'steam') return { ok: false, reason: `"${plugin}" is not configurable` };
+        const res = steamValidate(cfg);
+        if (!res.ok) return res;
+        steamCred = { account: res.account, steamId: res.steamId, friendCount: res.friendCount };
+        const s = readers.find((x) => x.plugin === 'steam');
+        if (s) {
+          s.connected = true;
+          s.account = res.account;
+          s.agoMs = 0;
+          s.lastOk = true;
+          s.nPersons = res.friendCount;
+        }
+        return { ok: true, connected: true, account: res.account, friendCount: res.friendCount };
+      },
+      // Forget the credentials (SPEC §6 sources.disconnect) — keeps synced people.
+      disconnect(plugin) {
+        if (plugin === 'steam') {
+          steamCred = null;
+          const s = readers.find((x) => x.plugin === 'steam');
+          if (s) { s.connected = false; s.account = null; }
+        }
+        return { ok: true, connected: false, note: 'Steam credentials removed. Already-synced people are kept on this machine.' };
       },
     },
     settings: {
