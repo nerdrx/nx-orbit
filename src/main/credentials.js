@@ -8,25 +8,21 @@
 // two rules: everything is stored here, and `redact()` is the only shape the
 // IPC/renderer layer is ever handed.
 //
-// Pure Node (no electron) so it stays unit-testable headless. The config dir is
-// overridable with $NX_ORBIT_CONFIG_DIR purely so tests can point it at a temp
-// directory; in the app it is always ~/.config/nx-orbit, the same directory the
-// database and ingest token already live in.
+// Pure Node (no electron) so it stays unit-testable headless. The directory is
+// resolved by paths.js — the ONE config-dir helper (SPEC §4) — which honours
+// $NX_ORBIT_CONFIG_DIR at call time; this module used to hand-roll that rule and
+// was the only one that had it, which is how a dev build ended up writing into
+// the installed build's database. `configDir` is re-exported so existing callers
+// keep working, but it is now the helper's client, not a second implementation.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { readFileSync, writeFileSync, existsSync, chmodSync } from 'node:fs';
+import * as paths from './paths.js';
 
 const FILE_MODE = 0o600; // rw for the owner only — never group/other readable
-const DIR_MODE = 0o700;
 
-export function configDir() {
-  return process.env.NX_ORBIT_CONFIG_DIR || join(homedir(), '.config', 'nx-orbit');
-}
+export const configDir = paths.configDir;
 
-function credentialsPath() {
-  return join(configDir(), 'credentials.json');
-}
+const credentialsPath = paths.credentialsPath;
 
 // Read the whole store, or {} if it does not exist / is unreadable. A corrupt
 // file is treated as empty rather than throwing — a bad secret store must never
@@ -46,8 +42,7 @@ function readAll() {
 // mode is (re)asserted on every write so a pre-existing loose-permission file is
 // tightened rather than trusted.
 function writeAll(store) {
-  const dir = configDir();
-  mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+  paths.ensureConfigDir();
   const p = credentialsPath();
   writeFileSync(p, JSON.stringify(store, null, 2), { mode: FILE_MODE });
   try {

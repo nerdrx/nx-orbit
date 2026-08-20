@@ -38,6 +38,11 @@ const orbit = {
     configure: (plugin, cfg) => call('sources.configure', plugin, cfg),
     test: (plugin, cfg) => call('sources.test', plugin, cfg),
     disconnect: (plugin) => call('sources.disconnect', plugin),
+    // §0.5: what one platform's data amounts to, and deleting it. Both take a
+    // Person.source ("steam", "discord"). preview never writes; forgetData never
+    // touches credentials — disconnect is the separate act.
+    preview: (source) => call('sources.preview', source),
+    forgetData: (source) => call('sources.forgetData', source),
   },
   settings: {
     get: () => call('settings.get'),

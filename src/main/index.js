@@ -205,16 +205,97 @@ function makeSourcesApi(plugins) {
       return { ok: true, connected: true, account: res.account, friendCount: res.friendCount };
     },
     // Forget a source's credentials. Already-ingested people are left alone (use
-    // people.forget to delete a person's data) — this only drops the secret.
+    // people.forget to delete a person's data, or sources.forgetData to delete a
+    // whole platform's) — this only drops the secret.
     disconnect: async (name) => {
       credentials.clearSourceConfig(name);
       return {
         ok: true,
         connected: false,
-        note: 'Steam credentials removed. Already-synced people are kept on this machine — delete a person with Forget on their card.',
+        note: 'Steam credentials removed. Already-synced people are kept on this machine — use Remove data to delete them, or Forget on one person’s card.',
+      };
+    },
+
+    // --- §0.5 removal at platform granularity --------------------------------
+    // preview() answers "what would this delete?" and NOTHING else: two COUNT(*)s
+    // and no writes, so the confirm can state real numbers. The UI must never
+    // show a guessed or remembered count — the whole point is that the operator
+    // knows exactly what they are agreeing to before they agree to it.
+    preview: async (source) => {
+      const s = String(source ?? '');
+      if (!s) return { ok: false, source: s, persons: 0, observations: 0, reason: 'no source named' };
+      if (s === db.SELF.source) return { ok: false, ...RESERVED_SELF, source: s };
+      try {
+        const { persons, observations } = db.countBySource(s);
+        return { ok: true, source: s, persons, observations, plugins: pluginsWritingSource(s) };
+      } catch (e) {
+        return { ok: false, source: s, persons: 0, observations: 0, reason: e?.message || 'could not read the database' };
+      }
+    },
+    // forgetData() hard-deletes every person and observation that came from one
+    // platform, plus that platform's audit rows. What it deliberately does NOT
+    // do (SPEC §0.5 — "the operator can always disconnect a source's credentials
+    // separately from deleting what it collected"):
+    //   • it does not touch credentials.json — the source stays connected;
+    //   • it does not stop or unschedule the reader — it will collect again on
+    //     its next run, which is the correct behaviour for "I want the fixtures
+    //     out of my roster", and disconnect() is right there for the other case.
+    // Nothing is deleted implicitly either way.
+    forgetData: async (source) => {
+      const s = String(source ?? '');
+      if (!s) return { ok: false, reason: 'no source named', removed: { persons: 0, observations: 0 } };
+      if (s === db.SELF.source) return { ok: false, ...RESERVED_SELF, removed: { persons: 0, observations: 0 } };
+      let res;
+      try {
+        res = db.forgetSource(s, { plugins: pluginsWritingSource(s) });
+      } catch (e) {
+        return { ok: false, reason: e?.message || 'removal failed', removed: { persons: 0, observations: 0 } };
+      }
+      // A reader's cached person count is now stale — refresh the ones that write
+      // this source so the card doesn't claim people that no longer exist. This
+      // is bookkeeping, not a stop: the reader stays scheduled and connected.
+      for (const [name, state] of sourceState) {
+        if (state.source !== s) continue;
+        try {
+          state.nPersons = db.listPersons({ source: s }).length;
+        } catch {
+          state.nPersons = 0;
+        }
+        sourceState.set(name, state);
+      }
+      return {
+        ok: true,
+        source: s,
+        removed: { persons: res.persons, observations: res.observations },
+        ingestLogRows: res.ingestLogRows,
+        // Said out loud so the renderer can repeat it: deleting is not disconnecting.
+        note: 'Credentials were not touched — this source is still connected and will collect again.',
       };
     },
   };
+}
+
+// The reserved `self` person (SPEC §2.1) is the operator's own presence anchor,
+// not a friend source: it is the "me" axis every overlap heatmap is computed
+// against, so removing it would quietly blank the feature rather than clean up a
+// platform. Refused identically by preview and forgetData.
+const RESERVED_SELF = Object.freeze({
+  persons: 0,
+  observations: 0,
+  reserved: true,
+  reason:
+    '“self” is your own presence anchor for the overlap heatmap, not a friend source — it can’t be removed here.',
+});
+
+// Which batch-`plugin` names write a given Person.source, from the ingest
+// registry (SPEC §2.1 "closed at runtime"). Used to delete the right audit rows:
+// `ingest_log` is keyed by plugin, the roster by source.
+function pluginsWritingSource(source) {
+  const out = [];
+  for (const [name, sources] of Object.entries(ingest.PLUGIN_SOURCES ?? {})) {
+    if (Array.isArray(sources) && sources.includes(source)) out.push(name);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------

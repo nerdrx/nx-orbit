@@ -55,7 +55,13 @@ is a hard constraint the code enforces, not an aspiration.
    Framework's world, likes DnB," not dossiers.
 5. **Forgetting is a feature.** A `retentionDays` setting prunes raw events on a
    rolling window (default 365). "Delete this person" hard-deletes every row
-   keyed to them across all plugins, immediately.
+   keyed to them across all plugins, immediately. **Removal works at every
+   granularity a person might regret at**: one person, one whole platform
+   (`sources.forgetData` — every person and observation that came from Steam,
+   say), and the operator can always disconnect a source's credentials
+   separately from deleting what it collected. Any destructive action states
+   exactly how many people and observations it will delete *before* doing it,
+   and nothing is deleted implicitly as a side effect of another action.
 6. **The operator is the only subject who matters.** There is exactly one user:
    you. Orbit never multi-tenants, never builds profiles "for" anyone else,
    never exposes an API for a third party to query your friends.
@@ -260,6 +266,13 @@ non-empty," newest first. Zero analysis.
 
 ## 4. Storage (`node:sqlite`, file at `~/.config/nx-orbit/orbit.sqlite3`)
 
+**Config-dir isolation.** Everything Orbit persists — `orbit.sqlite3`,
+`ingest.token`, `credentials.json` — lives under one directory, and that
+directory is `$NX_ORBIT_CONFIG_DIR` when set, else `~/.config/nx-orbit`. This is
+not a nicety: a development build and an installed build otherwise share one
+database, so test fixtures land in a real person's roster. Every module that
+opens a file under the config dir MUST resolve it through the same helper.
+
 ```sql
 CREATE TABLE person (
   source TEXT NOT NULL, source_id TEXT NOT NULL,
@@ -378,6 +391,8 @@ orbit.sources.runNow(plugin)         → triggers an in-process reader
 orbit.sources.configure(plugin, cfg) → store a source's config/credentials (0600 file); { ok, connected }
 orbit.sources.test(plugin, cfg)      → dry-run validate creds WITHOUT saving → { ok, account, friendCount } | { ok:false, reason }
 orbit.sources.disconnect(plugin)     → forget a source's credentials (does not delete already-ingested people)
+orbit.sources.preview(source)        → { persons, observations } counts that forgetData would delete
+orbit.sources.forgetData(source)     → §0.5 hard delete of EVERY person + observation from one platform
 orbit.settings.get() / .set(patch)   → { retentionDays, ingestPort, sources{} }
 ```
 

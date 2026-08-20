@@ -11,11 +11,11 @@
 import http from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as db from './db.js';
 import * as ingest from './ingest.js';
+import * as paths from './paths.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -33,8 +33,12 @@ function appVersion() {
 }
 const APP_VERSION = appVersion();
 
+// Resolved through paths.js, the one config-dir helper (SPEC §4): the token must
+// live beside the database it authorises writes into, so a build pointed at an
+// isolated $NX_ORBIT_CONFIG_DIR mints its own token instead of borrowing the
+// installed build's.
 export function defaultTokenPath() {
-  return join(homedir(), '.config', 'nx-orbit', 'ingest.token');
+  return paths.tokenPath();
 }
 
 // Read the ingest token, generating one on first run (0600).
@@ -43,7 +47,7 @@ export function getOrCreateToken(tokenPath = defaultTokenPath()) {
     const t = readFileSync(tokenPath, 'utf8').trim();
     if (t) return t;
   }
-  mkdirSync(dirname(tokenPath), { recursive: true });
+  mkdirSync(dirname(tokenPath), { recursive: true, mode: 0o700 });
   const token = randomBytes(32).toString('hex');
   writeFileSync(tokenPath, token + '\n', { mode: 0o600 });
   try {

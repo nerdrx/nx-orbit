@@ -761,6 +761,11 @@ async function viewSources() {
   const arr = asArray(list);
   const s = settings || {};
   const port = s.ingestPort ?? 8477;
+  // Real counts for every platform on this screen, fetched BEFORE anything is
+  // painted (SPEC §0.5). They decide whether a source can offer removal at all —
+  // an enabled button that deletes nothing is a lie — and the confirm re-reads
+  // them at click time so the number the operator agrees to is never stale.
+  const counts = await previewCounts(arr);
 
   // Two populations, two sections (SPEC §1's two ingest paths):
   //   readers  — run inside Orbit on a timer. Configurable ones (Steam) render
@@ -768,12 +773,17 @@ async function viewSources() {
   //   emitters — live in another app and POST to the loopback API. They have no
   //              in-process state, so what we show is what actually ARRIVED.
   // An entry with no `kind` is an older core — treat it as a reader, as before.
-  const readers = arr.filter((x) => x.kind !== 'emitter');
+  // The field is `sourceKind` (mergeSourceStatus writes that; nothing writes
+  // `kind`), so this used to keep EVERY entry — every emitter was painted twice,
+  // once as a bare reader row with a pointless "Run now" and again in External
+  // sources. Harmless-looking until each row grew a Remove data control and the
+  // same platform offered two of them.
+  const readers = arr.filter((x) => x.sourceKind !== 'emitter');
   const emitters = arr.filter((x) => x.sourceKind === 'emitter');
   const rows =
-    readers.filter((x) => x.configurable).map(connectCard).join('') +
-    readers.filter((x) => !x.configurable).map(srcRow).join('');
-  const emitterRows = emitters.map((e) => emitterRow(e, port)).join('');
+    readers.filter((x) => x.configurable).map((x) => connectCard(x, counts)).join('') +
+    readers.filter((x) => !x.configurable).map((x) => srcRow(x, counts)).join('');
+  const emitterRows = emitters.map((e) => emitterRow(e, port, counts)).join('');
   const liveCount = emitters.filter((e) => e.health === 'live').length;
 
   return `
@@ -826,6 +836,99 @@ async function viewSources() {
 
 const SRC_LABELS = { vrcx: 'VRCX', 'vencord-orbit-bridge': 'Vencord bridge', 'twitter-orbit': 'twitter-orbit', steam: 'Steam', manual: 'Manual (you)' };
 
+/* ------------------------------------------------- removing a source's data
+   SPEC §0.5: "Removal works at every granularity a person might regret at" —
+   one person, or one whole platform. This is the platform one, and it exists
+   because of a real incident: a development build shared the installed build's
+   database, a plugin's test fixtures landed in a real roster, and the only way
+   out was deleting invented people one at a time.
+
+   Three rules the UI enforces, not decorates:
+     1. A confirm never shows a guessed number. Counts come from
+        sources.preview(), which reads and writes nothing.
+     2. A source with nothing collected offers no button at all — an enabled
+        control that deletes zero rows teaches the operator to distrust it.
+     3. Removing data and disconnecting a source are DIFFERENT ACTS, shown
+        apart, in their own words. Conflating them is the confusion this fixes. */
+
+// Platform names as a person would say them, not as the registry spells them.
+const SOURCE_LABELS = { vrcx: 'VRChat', discord: 'Discord', twitter: 'X', steam: 'Steam', contacts: 'Contacts', mastodon: 'Mastodon', matrix: 'Matrix', lastfm: 'Last.fm', manual: 'Manual' };
+const sourceLabel = (s) => SOURCE_LABELS[s] || s;
+
+// The Person.source(s) one status entry is responsible for. Readers carry one;
+// emitters carry the set their plugin declares. `self` is the operator's own
+// presence anchor (§2.1), never a friend source, so it is never offered.
+function sourcesOf(entry) {
+  const list = Array.isArray(entry?.sources) && entry.sources.length
+    ? entry.sources
+    : entry?.source
+      ? [entry.source]
+      : [];
+  return list.filter((s) => typeof s === 'string' && s && s !== 'self');
+}
+
+// Ask the core what each platform on this screen actually holds. One round trip
+// per distinct source, all in flight together. Returns null when the core
+// predates sources.preview — the UI then shows no removal control at all rather
+// than one that would throw, and says nothing it cannot back up.
+async function previewCounts(entries) {
+  if (typeof orbit.sources?.preview !== 'function') return null;
+  const names = [...new Set(asArray(entries).flatMap(sourcesOf))];
+  const out = new Map();
+  await Promise.all(
+    names.map(async (name) => {
+      try {
+        const r = await orbit.sources.preview(name);
+        if (r && r.ok !== false) {
+          out.set(name, { persons: Number(r.persons) || 0, observations: Number(r.observations) || 0 });
+        }
+      } catch {
+        /* one unreadable source must not blank the whole view */
+      }
+    }),
+  );
+  return out;
+}
+
+const countPhrase = (c) =>
+  `${fmtCount(c.persons)} ${c.persons === 1 ? 'person' : 'people'} and ${fmtCount(c.observations)} ${c.observations === 1 ? 'observation' : 'observations'}`;
+
+// The result of the last removal, so the view that repaints after it can say
+// what happened in place, next to the source it happened to — a toast alone
+// scrolls away before the operator has read it. Cleared on navigation.
+let lastRemoval = null;
+
+// The removal control for one source. Disabled state is an absence, not a greyed
+// button: "Nothing collected yet" is the whole truth and needs no affordance.
+function removeDataBlock(entry, counts) {
+  if (!counts) return '';
+  return sourcesOf(entry)
+    .map((src) => {
+      const c = counts.get(src);
+      if (!c) return ''; // preview failed for this one — claim nothing
+      const label = sourceLabel(src);
+      const done =
+        lastRemoval && lastRemoval.source === src
+          ? `<p class="src-removed" role="status">Removed ${esc(countPhrase(lastRemoval))} from ${esc(label)}.</p>`
+          : '';
+      if (!c.persons && !c.observations) {
+        return `
+          <div class="src-danger" data-source-block="${esc(src)}">
+            ${done}
+            <span class="src-danger-none">Nothing collected yet</span>
+            <span class="src-danger-note">Orbit holds no ${esc(label)} people or observations on this machine.</span>
+          </div>`;
+      }
+      return `
+        <div class="src-danger" data-source-block="${esc(src)}">
+          ${done}
+          <button class="btn sm" data-forget-source="${esc(src)}">Remove data</button>
+          <span class="src-danger-note">Deletes the ${esc(countPhrase(c))} that came from ${esc(label)}. Nothing else is touched — this source stays connected.</span>
+        </div>`;
+    })
+    .join('');
+}
+
 // External emitters, named the way the operator installed them — the plugin id
 // plus the platform it feeds, because "twitter-orbit" alone doesn't tell you it
 // is the thing that fills your X friends in.
@@ -851,7 +954,7 @@ const HEALTH_UI = {
 };
 const healthUi = (h) => HEALTH_UI[h] || HEALTH_UI.waiting;
 
-function srcRow(s) {
+function srcRow(s, counts) {
   const ui = healthUi(s.health ?? (s.lastOk === false ? 'error' : s.lastRun ? 'live' : 'waiting'));
   const stateChip =
     s.health === 'error' || s.lastOk === false
@@ -861,12 +964,14 @@ function srcRow(s) {
         : '<span class="chip off">Not run yet</span>';
   const label = SRC_LABELS[s.plugin] || s.plugin;
   const n = s.nPersons ?? 0;
+  const remove = removeDataBlock(s, counts);
   return `
-    <div class="card src-row">
+    <div class="card src-row${remove ? ' has-danger' : ''}">
       <span class="src-ico">${I.sources}<span class="sdot" style="background:${ui.dot}"></span></span>
       <div class="src-body">
         <b>${esc(label)}</b>
         <div class="src-meta">${fmtCount(n)} ${n === 1 ? 'person' : 'people'} · last run ${s.lastRun ? esc(relTime(s.lastRun)) : 'never'}</div>
+        ${remove}
       </div>
       ${stateChip}
       <button class="btn sm" data-run="${esc(s.plugin)}">Run now</button>
@@ -877,7 +982,7 @@ function srcRow(s) {
 // second line: it is a fact about deliveries that actually landed in the §4
 // audit log, not a guess, and when nothing has landed it says so and says what
 // to check. Nothing here is data about a person — plugin name, version, counts.
-function emitterRow(e, port) {
+function emitterRow(e, port, counts) {
   const health = e.health || (e.lastReceivedAt ? 'live' : 'waiting');
   const ui = healthUi(health);
   const age = e.ageMs != null ? fmtDuration(e.ageMs) : null;
@@ -889,11 +994,11 @@ function emitterRow(e, port) {
 
   const n = e.nPersons ?? 0;
   const obs = e.totalObs ?? e.nObs ?? 0;
-  const counts =
+  const countsLine =
     health === 'waiting'
       ? 'Nothing delivered yet'
       : `${fmtCount(n)} ${n === 1 ? 'person' : 'people'} · ${fmtCount(obs)} ${obs === 1 ? 'observation' : 'observations'}`;
-  const meta = [counts];
+  const meta = [countsLine];
   if (e.deliveries) meta.push(`${fmtCount(e.deliveries)} ${e.deliveries === 1 ? 'batch' : 'batches'}`);
   if (e.version) meta.push(`<span class="src-ver mono">v${esc(e.version)}</span>`);
   const metaLine = meta.join('<span class="src-dot-sep">·</span>');
@@ -906,6 +1011,7 @@ function emitterRow(e, port) {
         <div class="src-state ${esc(health)}">${state}</div>
         <div class="src-meta">${metaLine}</div>
         ${health === 'waiting' ? emitterHint(e.plugin, port) : ''}
+        ${removeDataBlock(e, counts)}
       </div>
       <span class="${ui.chip}">${health === 'live' ? '<span class="cdot"></span>' : ''}${esc(ui.chipText)}</span>
     </div>`;
@@ -979,12 +1085,15 @@ function tokenRow() {
 // operator never has to touch a terminal (SPEC §6, the whole point of the task).
 // Two states: not connected → a friendly numbered walkthrough with fields, Test
 // and Connect; connected → account, friends synced, Sync now, Disconnect.
-function connectCard(s) {
+function connectCard(s, counts) {
   const label = SRC_LABELS[s.plugin] || s.plugin;
   const n = s.nPersons ?? 0;
   const privacy = `<p class="cc-privacy">${I.lock}<span>Your API key and friend data stay on this machine. Orbit only ever talks to Steam’s official API — nothing is uploaded.</span></p>`;
 
   if (s.connected) {
+    // Two different acts, side by side, each said in one line — because
+    // "disconnect" and "delete what it collected" were conflated, and an
+    // operator who wanted the second got the first and kept the people.
     return `
     <div class="card connect-card is-connected" data-connect="${esc(s.plugin)}">
       <div class="cc-head">
@@ -999,8 +1108,8 @@ function connectCard(s) {
       ${privacy}
       <div class="cc-actions">
         <button class="btn sm" data-run="${esc(s.plugin)}">Sync now</button>
-        <button class="btn sm danger" data-steam-disconnect="${esc(s.plugin)}">Disconnect</button>
       </div>
+      ${connectedSplit(s, counts)}
     </div>`;
   }
 
@@ -1041,6 +1150,46 @@ function connectCard(s) {
         <button class="btn sm" data-steam-test="${esc(s.plugin)}">Test connection</button>
         <button class="btn sm primary" data-steam-connect="${esc(s.plugin)}">Connect</button>
       </div>
+      ${removeDataBlock(s, counts)}
+    </div>`;
+}
+
+// The connected state's two exits, deliberately NOT one button. They are
+// independent (SPEC §0.5): you may forget the key and keep the people, delete
+// the people and stay connected, or do both — in either order.
+function connectedSplit(s, counts) {
+  const src = sourcesOf(s)[0];
+  const c = counts && src ? counts.get(src) : null;
+  const label = src ? sourceLabel(src) : (SRC_LABELS[s.plugin] || s.plugin);
+  const done =
+    lastRemoval && lastRemoval.source === src
+      ? `<p class="src-removed" role="status">Removed ${esc(countPhrase(lastRemoval))} from ${esc(label)}.</p>`
+      : '';
+
+  const removeSide = !c
+    ? '' // a core without preview, or a source we could not read — claim nothing
+    : c.persons || c.observations
+      ? `
+      <div class="cc-choice" data-source-block="${esc(src)}">
+        <b>Remove data</b>
+        <p>Deletes the ${esc(countPhrase(c))} ${esc(label)} put in your roster. Your key is kept and you stay connected — the next sync will bring back whoever is still your friend there.</p>
+        <button class="btn sm" data-forget-source="${esc(src)}">Remove data</button>
+      </div>`
+      : `
+      <div class="cc-choice" data-source-block="${esc(src)}">
+        <b>Remove data</b>
+        <p>Nothing collected yet — Orbit holds no ${esc(label)} people or observations on this machine.</p>
+      </div>`;
+
+  return `
+    ${done}
+    <div class="cc-split">
+      <div class="cc-choice">
+        <b>Disconnect</b>
+        <p>Forgets your API key, so ${esc(label)} stops syncing. Everyone it already brought in stays in your roster.</p>
+        <button class="btn sm" data-steam-disconnect="${esc(s.plugin)}">Disconnect</button>
+      </div>
+      ${removeSide}
     </div>`;
 }
 
@@ -1393,6 +1542,26 @@ function tlItem(e, showSource = false) {
     </div>`;
 }
 
+// Every confirm can be dismissed three ways — Cancel, the scrim, and Escape.
+// Escape is not a nicety on a destructive dialog: it is the reflex a person
+// reaches for when they realise they clicked the wrong thing, and a dialog that
+// ignores it is a dialog they have to aim at to escape.
+function wireDismiss(holder, cleanup) {
+  const onKey = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); close(); }
+  };
+  const close = () => {
+    document.removeEventListener('keydown', onKey, true);
+    cleanup();
+  };
+  const cancel = $('[data-cancel]', holder);
+  if (cancel) cancel.addEventListener('click', close);
+  const scrim = $('.scrim', holder);
+  if (scrim) scrim.addEventListener('click', close);
+  document.addEventListener('keydown', onKey, true);
+  return close;
+}
+
 // A small, reusable confirm sheet (used by Unlink). Non-destructive by default;
 // pass danger:true for a red confirm button. onConfirm runs on confirm; the
 // dialog closes itself either way.
@@ -1410,11 +1579,95 @@ function confirmDialog({ title, body, confirmLabel = 'Confirm', danger = false }
       </div>
     </div>`;
   root.appendChild(holder);
-  const cleanup = () => holder.remove();
-  $('[data-cancel]', holder).addEventListener('click', cleanup);
-  $('.scrim', holder).addEventListener('click', cleanup);
+  const close = wireDismiss(holder, () => holder.remove());
   const go = $('[data-confirm]', holder);
-  go.addEventListener('click', () => { cleanup(); onConfirm(); });
+  go.addEventListener('click', () => { close(); onConfirm(); });
+  go.focus();
+}
+
+/* ------------------------------------------- remove one platform's data (§0.5)
+   The counts in this dialog are fetched immediately before it opens and are
+   never carried over from the last render: the sentence the operator agrees to
+   has to be true at the moment they agree to it. The button is neutral at rest
+   and only the confirm inside the dialog is --danger — a resting red button is
+   a warning you stop reading after the second visit. */
+async function startSourceRemoval(btn) {
+  const source = btn.dataset.forgetSource;
+  if (!source) return;
+  const label = sourceLabel(source);
+  const restore = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Checking…';
+
+  let pv;
+  try {
+    pv = await orbit.sources.preview(source);
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = restore;
+    toast(`Could not read what ${label} holds — ${err?.message || 'the core did not answer.'}`, 'danger');
+    return;
+  }
+  btn.disabled = false;
+  btn.textContent = restore;
+
+  if (pv && pv.ok === false) {
+    toast(pv.reason || `Orbit cannot remove ${label} data.`, 'warn');
+    return;
+  }
+  const c = { persons: Number(pv?.persons) || 0, observations: Number(pv?.observations) || 0 };
+  // Between paint and click the source may have been emptied (a retention prune,
+  // another window). Say so and repaint rather than confirming a delete of zero.
+  if (!c.persons && !c.observations) {
+    toast(`Nothing from ${label} is stored here — there is nothing to remove.`, 'warn');
+    render();
+    return;
+  }
+
+  const root = $('#sheet-root');
+  const holder = document.createElement('div');
+  holder.innerHTML = `
+    <div class="scrim" style="z-index:49"></div>
+    <div class="confirm" role="dialog" aria-modal="true" aria-labelledby="rm-title" aria-describedby="rm-body">
+      <h3 id="rm-title">Delete ${esc(countPhrase(c))} that came from ${esc(label)}?</h3>
+      <p id="rm-body">This can’t be undone. Every ${esc(label)} person and every observation about them is hard-deleted from this machine, immediately.</p>
+      <p class="confirm-note">Your ${esc(label)} connection is <b>not</b> touched — no credentials are removed, and the source will collect again on its next run. Use <b>Disconnect</b> for that.</p>
+      <div class="form-actions">
+        <button class="btn ghost sm" data-cancel>Keep it</button>
+        <button class="btn danger sm" data-confirm>Delete ${esc(fmtCount(c.persons))} ${c.persons === 1 ? 'person' : 'people'}</button>
+      </div>
+    </div>`;
+  root.appendChild(holder);
+  const close = wireDismiss(holder, () => holder.remove());
+  const go = $('[data-confirm]', holder);
+  go.addEventListener('click', async () => {
+    go.disabled = true;
+    go.textContent = 'Deleting…';
+    let res;
+    try {
+      res = await orbit.sources.forgetData(source);
+    } catch (err) {
+      go.disabled = false;
+      go.textContent = 'Delete';
+      toast(`Could not remove ${label} data — ${err?.message || 'the core did not answer.'}`, 'danger');
+      return;
+    }
+    if (res && res.ok === false) {
+      go.disabled = false;
+      go.textContent = 'Delete';
+      toast(res.reason || `Could not remove ${label} data.`, 'danger');
+      return;
+    }
+    // Report what the CORE says it deleted, not what preview predicted.
+    const removed = {
+      persons: Number(res?.removed?.persons) || 0,
+      observations: Number(res?.removed?.observations) || 0,
+    };
+    lastRemoval = { source, ...removed };
+    close();
+    toast(`Removed ${countPhrase(removed)} from ${label}.`, 'ok');
+    render();
+  });
   go.focus();
 }
 
@@ -1432,9 +1685,7 @@ function confirmForget(person, afterClose) {
       </div>
     </div>`;
   root.appendChild(holder);
-  const cleanup = () => holder.remove();
-  $('[data-cancel]', holder).addEventListener('click', cleanup);
-  $('.scrim', holder).addEventListener('click', cleanup);
+  const cleanup = wireDismiss(holder, () => holder.remove());
   const go = $('[data-confirm]', holder);
   go.addEventListener('click', async () => {
     go.disabled = true;
@@ -1517,6 +1768,9 @@ async function updateRailFoot() {
 function setView(v) {
   if (!VIEWS[v]) return;
   if (v !== current) changesShown = CHANGES_PAGE; // a fresh visit starts at page 1
+  // "Removed 8 people…" belongs to the screen it happened on; leaving the view
+  // is the operator saying they have read it.
+  if (v !== current) lastRemoval = null;
   current = v;
   rail.querySelectorAll('.rail-item').forEach((b) => b.setAttribute('aria-selected', b.dataset.view === v ? 'true' : 'false'));
   render();
@@ -1627,6 +1881,14 @@ function wireView() {
         }
       }),
     );
+    // --- §0.5 remove one platform's data --------------------------------------
+    // Every source on this screen has one of these: the reader connect cards and
+    // every External sources row. The click only OPENS the flow — it reads the
+    // real counts first and nothing is deleted before the confirm.
+    main.querySelectorAll('[data-forget-source]').forEach((b) =>
+      b.addEventListener('click', () => startSourceRemoval(b)),
+    );
+
     // --- Steam Connect flow ---------------------------------------------------
     const readSteamCfg = () => ({
       apiKey: ($('#steam-key', main)?.value ?? '').trim(),

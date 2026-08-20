@@ -28,6 +28,8 @@ export const CHANNELS = [
   'sources.configure',
   'sources.test',
   'sources.disconnect',
+  'sources.preview',
+  'sources.forgetData',
   'settings.get',
   'settings.set',
 ];
@@ -82,6 +84,13 @@ export function register({ sources } = {}) {
   handle('sources.configure', (plugin, cfg) => (sources ? sources.configure(plugin, cfg) : { ok: false, reason: 'no sources' }));
   handle('sources.test', (plugin, cfg) => (sources ? sources.test(plugin, cfg) : { ok: false, reason: 'no sources' }));
   handle('sources.disconnect', (plugin) => (sources ? sources.disconnect(plugin) : { ok: false, reason: 'no sources' }));
+  // §0.5 removal at platform granularity. preview = counts only, no writes (the
+  // numbers the confirm must state); forgetData = the hard delete. They take a
+  // Person.source ("steam"), not a plugin name — a platform is what the operator
+  // means by "get this out of my roster". Credentials are NOT touched by either:
+  // disconnecting and deleting are deliberately separate acts.
+  handle('sources.preview', (source) => (sources ? sources.preview(source) : { ok: false, reason: 'no sources', persons: 0, observations: 0 }));
+  handle('sources.forgetData', (source) => (sources ? sources.forgetData(source) : { ok: false, reason: 'no sources', removed: { persons: 0, observations: 0 } }));
 
   handle('settings.get', () => db.getSettings());
   handle('settings.set', (patch) => db.setSettings(patch ?? {}));

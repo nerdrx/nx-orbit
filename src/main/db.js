@@ -4,8 +4,8 @@
 
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { dirname } from 'node:path';
+import * as paths from './paths.js';
 
 export const SCHEMA_VERSION = 1;
 
@@ -14,9 +14,11 @@ export const SCHEMA_VERSION = 1;
 // on open() so plugins can emit observations about it without upserting it.
 export const SELF = Object.freeze({ source: 'self', sourceId: 'me' });
 
-// Default on-disk location (SPEC §4). Tests pass an explicit path instead.
+// Default on-disk location (SPEC §4). Resolved through paths.js — the single
+// config-dir helper — so a dev build launched with $NX_ORBIT_CONFIG_DIR can
+// never open the installed build's database. Tests pass an explicit path.
 export function defaultDbPath() {
-  return join(homedir(), '.config', 'nx-orbit', 'orbit.sqlite3');
+  return paths.dbPath();
 }
 
 let db = null;
@@ -361,16 +363,93 @@ export function getLinks(id) {
     .all(source, sourceId, source, sourceId);
 }
 
+// person_link has no foreign key, so nothing cascades it — every delete path
+// clears its own edges or leaves a dangling half-edge behind (which would then
+// resurrect as a phantom cluster member the next time someone with the same
+// (source, source_id) was ingested). A link is stored in ONE orientation but is
+// semantically symmetric, so both orientations must always be matched.
+function clearLinksForPerson(source, sourceId) {
+  return db
+    .prepare(
+      `DELETE FROM person_link
+       WHERE (a_source = ? AND a_id = ?) OR (b_source = ? AND b_id = ?)`
+    )
+    .run(source, sourceId, source, sourceId).changes;
+}
+
+// The same rule, one platform wide: every edge with EITHER end on `source`.
+function clearLinksForSource(source) {
+  return db
+    .prepare('DELETE FROM person_link WHERE a_source = ? OR b_source = ?')
+    .run(source, source).changes;
+}
+
 // §0.5 hard delete: observations cascade via ON DELETE CASCADE; link rows
 // (no FK) are cleared here so no dangling reference survives.
 export function forgetPerson(id) {
   const { source, sourceId } = parsePersonId(id);
-  db.prepare(
-    `DELETE FROM person_link
-     WHERE (a_source = ? AND a_id = ?) OR (b_source = ? AND b_id = ?)`
-  ).run(source, sourceId, source, sourceId);
+  clearLinksForPerson(source, sourceId);
   db.prepare('DELETE FROM person WHERE source = ? AND source_id = ?').run(source, sourceId);
   return true;
+}
+
+// How much of the database one platform accounts for — the exact population
+// forgetSource() would delete. Read-only by construction: two COUNT(*)s and
+// nothing else, so the UI can state real numbers in a confirm without the act
+// of asking changing anything (SPEC §0.5: "states exactly how many people and
+// observations it will delete BEFORE doing it").
+export function countBySource(source) {
+  const persons = db
+    .prepare('SELECT COUNT(*) AS n FROM person WHERE source = ?')
+    .get(source).n;
+  const observations = db
+    .prepare('SELECT COUNT(*) AS n FROM observation WHERE source = ?')
+    .get(source).n;
+  return { persons, observations };
+}
+
+// §0.5 removal at PLATFORM granularity: every person that came from one source,
+// their observations (FK cascade), the link edges that pointed at them, and that
+// source's rows in the audit log — in one transaction, so a failure halfway
+// leaves the roster exactly as it was.
+//
+// `plugins` is the set of batch-`plugin` names whose ingest_log rows belong to
+// this source; db.js deliberately does not import ingest.js (it is the only
+// module that opens SQLite and has no dependencies), so the caller — which does
+// have ingest.PLUGIN_SOURCES — passes them in. The default covers the common
+// case where the plugin is named after its source.
+//
+// It does NOT touch credentials: disconnecting a source and deleting what it
+// collected are independent operations, on purpose (SPEC §0.5). After this the
+// source is still connected and will collect again on its next run.
+//
+// The reserved `self` person (§2.1) is refused: it is the operator's own
+// presence anchor — the "me" axis of the overlap heatmap — not a friend source,
+// and deleting it would silently empty every heatmap in the app.
+export function forgetSource(source, { plugins = [source] } = {}) {
+  if (typeof source !== 'string' || source.trim() === '') {
+    throw new Error('forgetSource needs a source name');
+  }
+  if (source === SELF.source) {
+    throw new Error(
+      'the reserved self person is not a friend source and cannot be removed — ' +
+        'it is the "me" axis of the overlap heatmap'
+    );
+  }
+  return tx(() => {
+    // Counted inside the transaction, before anything is deleted, so the number
+    // reported back is what was actually removed rather than an earlier guess.
+    const { persons, observations } = countBySource(source);
+    const links = clearLinksForSource(source);
+    db.prepare('DELETE FROM person WHERE source = ?').run(source);
+    let ingestLogRows = 0;
+    const names = Array.from(new Set((plugins ?? []).filter((p) => typeof p === 'string' && p)));
+    if (names.length) {
+      const stmt = db.prepare('DELETE FROM ingest_log WHERE plugin = ?');
+      for (const name of names) ingestLogRows += stmt.run(name).changes;
+    }
+    return { source, persons, observations, links, ingestLogRows };
+  });
 }
 
 // ---------------------------------------------------------------------------

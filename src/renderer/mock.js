@@ -221,6 +221,19 @@ if (!window.orbit) {
     { source: 'discord', sourceId: '540221badger',   handle: 'badger',   displayName: 'badger_',   online: false, birthday: '10-02', pronouns: 'they/them', statusText: '', statusKind: 'offline', place: '', bio: '', note: '', peak: 'night', weekendBias: 1.1 },
     { source: 'vrcx',    sourceId: 'usr_badger7f',   handle: 'badgerVR', displayName: 'Badger 🦡', online: true,  birthday: null,    pronouns: 'they/them', statusText: 'building a burrow world', statusKind: 'joinme', place: 'Hollow Barn', bio: 'worldbuilder, nocturnal.', note: '', peak: 'night', weekendBias: 1.2 },
 
+    // -- a small emitter-only population (SPEC §1 path 2) ---------------------
+    // Six invented Last.fm mutuals, so the `lastfm-orbit` emitter row is backed
+    // by people that actually exist in this roster. Without them "Remove data"
+    // on that row would offer to delete a population the demo does not have, and
+    // the count in the confirm has to be the truth, always. Invented, like every
+    // name in this file.
+    { source: 'lastfm', sourceId: 'lfm_petrichor', handle: 'petrichor_fm', displayName: 'petrichor', online: false, birthday: null,    pronouns: 'she/her',   statusText: '', statusKind: 'offline', place: '', bio: 'shoegaze and long walks.', note: '', peak: 'eve',   weekendBias: 1.0 },
+    { source: 'lastfm', sourceId: 'lfm_slowtape',  handle: 'slowtape',    displayName: 'slowtape',  online: false, birthday: null,    pronouns: 'they/them', statusText: '', statusKind: 'offline', place: '', bio: 'tape loops.', note: '', peak: 'night', weekendBias: 0.9 },
+    { source: 'lastfm', sourceId: 'lfm_marimba',   handle: 'marimbamoth', displayName: 'marimbamoth', online: false, birthday: '03-11', pronouns: '',        statusText: '', statusKind: 'offline', place: '', bio: '', note: '', peak: 'day',   weekendBias: 1.1 },
+    { source: 'lastfm', sourceId: 'lfm_hollowfm',  handle: 'hollow_fm',   displayName: 'hollow',    online: false, birthday: null,    pronouns: 'he/him',    statusText: '', statusKind: 'offline', place: '', bio: 'drone, mostly.', note: '', peak: 'night', weekendBias: 1.0 },
+    { source: 'lastfm', sourceId: 'lfm_ferrous',   handle: 'ferrous',     displayName: 'ferrous',   online: false, birthday: null,    pronouns: '',          statusText: '', statusKind: 'offline', place: '', bio: '', note: '', peak: 'eve',   weekendBias: 0.8 },
+    { source: 'lastfm', sourceId: 'lfm_quietcar',  handle: 'quietcarriage', displayName: 'quiet carriage', online: false, birthday: null, pronouns: 'she/they', statusText: '', statusKind: 'offline', place: '', bio: 'trains, ambient, both.', note: '', peak: 'day', weekendBias: 0.7 },
+
     // An ALREADY-LINKED cluster (see SEED_LINKS below), so the "Also on other
     // platforms" + Unlink path renders on first open without any setup.
     { source: 'vrcx',    sourceId: 'usr_noct91',     handle: 'noctis',   displayName: 'Noctis',    online: true,  birthday: null,    pronouns: 'she/her',   statusText: '', statusKind: 'askme', place: 'Prismatic Void', bio: 'aurora chaser.', note: 'Met at the winter meetup.', peak: 'night', weekendBias: 1.0 },
@@ -538,6 +551,28 @@ if (!window.orbit) {
   }
   const countOf = (source) => FRIENDS.filter((f) => f.source === source).length;
 
+  // What one platform amounts to in this roster: its people and their
+  // observations. Read-only — preview() must never change what it reports on.
+  function sourceCounts(source) {
+    let persons = 0;
+    let observations = 0;
+    for (const f of FRIENDS) {
+      if (f.source !== source) continue;
+      persons++;
+      observations += (TIMELINES.get(idOf(f)) || []).length;
+    }
+    return { persons, observations };
+  }
+
+  // The reserved operator identity is a presence anchor, not a friend source —
+  // refused by both preview and forgetData, exactly as the core refuses it.
+  const RESERVED_SELF = {
+    persons: 0,
+    observations: 0,
+    reserved: true,
+    reason: '“self” is your own presence anchor for the overlap heatmap, not a friend source — it can’t be removed here.',
+  };
+
   // agoMs = how long ago it last ran/delivered; null = never.
   const readers = [
     { plugin: 'vrcx', source: 'vrcx', agoMs: 6 * 60000, lastOk: true, nPersons: countOf('vrcx'), configurable: false, connected: true, account: null, version: '1.0.0', deliveries: 812, nObs: 34, totalObs: 61240 },
@@ -548,7 +583,7 @@ if (!window.orbit) {
     // Working: the Vencord bridge flushes every 30s, so a live one is minutes old.
     { plugin: 'vencord-orbit-bridge', sources: ['discord'], version: '1.0.0', agoMs: 2 * 60000, nPersons: countOf('discord'), nObs: 17, totalObs: 12408, deliveries: 2841 },
     // Went quiet: delivered for months, nothing for three days.
-    { plugin: 'lastfm-orbit', sources: ['lastfm'], version: '1.0.0', agoMs: 3 * DAY, nPersons: 6, nObs: 96, totalObs: 3120, deliveries: 154 },
+    { plugin: 'lastfm-orbit', sources: ['lastfm'], version: '1.0.0', agoMs: 3 * DAY, nPersons: countOf('lastfm'), nObs: 96, totalObs: 3120, deliveries: 154 },
     // Never installed: the "waiting for first delivery" rows, with their hints.
     { plugin: 'twitter-orbit', sources: ['twitter'], version: null, agoMs: null, nPersons: countOf('twitter'), nObs: 0, totalObs: 0, deliveries: 0 },
     { plugin: 'contacts-orbit', sources: ['contacts'], version: null, agoMs: null, nPersons: 0, nObs: 0, totalObs: 0, deliveries: 0 },
@@ -867,7 +902,40 @@ if (!window.orbit) {
           const s = readers.find((x) => x.plugin === 'steam');
           if (s) { s.connected = false; s.account = null; }
         }
-        return { ok: true, connected: false, note: 'Steam credentials removed. Already-synced people are kept on this machine.' };
+        return { ok: true, connected: false, note: 'Steam credentials removed. Already-synced people are kept on this machine — use Remove data to delete them.' };
+      },
+
+      // --- §0.5 removal at platform granularity -----------------------------
+      // preview() counts what forgetData() would delete and writes NOTHING, so
+      // the confirm can state real numbers. Counting here is the same shape the
+      // core counts in SQL: people whose `source` is this platform, plus their
+      // observations (the mock's per-person timelines are its observations).
+      preview(source) {
+        const s = String(source ?? '');
+        if (!s) return { ok: false, source: s, persons: 0, observations: 0, reason: 'no source named' };
+        if (s === 'self') return { ok: false, source: s, ...RESERVED_SELF };
+        return { ok: true, source: s, ...sourceCounts(s) };
+      },
+      // forgetData() deletes every person and observation from one platform.
+      // It does NOT clear credentials and does NOT stop the source: after
+      // removing Steam's people the card is still connected and would sync them
+      // back on its next run. Deleting and disconnecting are separate acts
+      // (SPEC §0.5), and this mock has to demonstrate that difference honestly.
+      forgetData(source) {
+        const s = String(source ?? '');
+        if (!s) return { ok: false, reason: 'no source named', removed: { persons: 0, observations: 0 } };
+        if (s === 'self') return { ok: false, ...RESERVED_SELF, removed: { persons: 0, observations: 0 } };
+        const removed = sourceCounts(s);
+        for (const id of PEOPLE.filter((p) => p.source === s).map((p) => p.id)) impl.people.forget(id);
+        // The rows that report on this platform now describe an empty roster.
+        for (const r of readers) if (r.source === s) r.nPersons = countOf(s);
+        for (const e of emitters) if ((e.sources || []).includes(s)) e.nPersons = countOf(s);
+        return {
+          ok: true,
+          source: s,
+          removed,
+          note: 'Credentials were not touched — this source is still connected and will collect again.',
+        };
       },
     },
     settings: {

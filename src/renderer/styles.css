@@ -923,6 +923,54 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.5; }
 .src-docs { display: block; margin-top: 6px; }
 .doc-path { color: var(--violet-soft); font-size: 12px; word-break: break-all; }
 
+/* ------------------------------------------- removing a source's data (§0.5)
+   A destructive control that lives permanently on a status row cannot shout: it
+   would be shouting on every visit, and by the third one nobody reads it. So the
+   resting state is a plain button plus the sentence that makes it unambiguous
+   (what goes, what stays), and --danger appears only inside the confirm, where
+   it is a single moment rather than furniture. */
+.src-row.has-danger { align-items: flex-start; }
+.src-row.has-danger .src-ico { margin-top: 2px; }
+.src-danger {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 10px; padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+}
+.src-danger .btn { flex: 0 0 auto; }
+.src-danger-note {
+  flex: 1 1 240px; min-width: 0;
+  font-size: 12px; color: var(--muted); line-height: 1.5;
+}
+/* Not a disabled button: an absence with a label. There is nothing to press,
+   so there is nothing that looks pressable. */
+.src-danger-none {
+  flex: 0 0 auto;
+  font-size: 12px; font-weight: 600; color: var(--muted);
+  padding: 5px 10px; border-radius: var(--radius-sm);
+  background: var(--well); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06);
+}
+/* The result line — what actually happened, next to where it happened. */
+.src-removed {
+  flex: 1 1 100%; margin: 0 0 2px;
+  font-size: 12.5px; line-height: 1.5; color: var(--orbit-live);
+}
+
+/* The connected reader's two exits. Two panels, never two buttons in a row:
+   "Disconnect" and "Remove data" do different things and the layout has to say
+   so before the labels do. */
+.cc-split {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px; margin-top: 2px;
+}
+.cc-choice {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+  padding: 12px; border-radius: var(--radius-sm);
+  background: var(--well); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06);
+}
+.cc-choice b { font-size: 13px; font-weight: 640; }
+.cc-choice p { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.cc-choice .btn { margin-top: auto; }
+
 /* ------------------------------------------------------------ ingest token */
 .tok-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tok-value {
@@ -1175,6 +1223,16 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.5; }
 .confirm h3 { margin: 0 0 8px; font-size: 16px; font-weight: 680; }
 .confirm p { margin: 0 0 var(--sp-3); font-size: 13px; color: var(--muted); line-height: 1.55; }
 .confirm .form-actions { justify-content: flex-end; margin: 0; }
+/* The "and this is what is NOT affected" line. Quieter than the body, because
+   it is reassurance, but present, because deleting data and disconnecting a
+   source are separate acts and the confirm is where that gets confused. */
+.confirm .confirm-note {
+  margin: -8px 0 var(--sp-3);
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  background: var(--well); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06);
+  font-size: 12px; color: var(--muted); line-height: 1.5;
+}
+.confirm .confirm-note b { color: var(--text); font-weight: 640; }
 
 /* ================================================================ toasts */
 .toasts { position: fixed; right: 18px; bottom: 18px; z-index: 60; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
