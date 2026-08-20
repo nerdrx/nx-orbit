@@ -246,6 +246,7 @@ export function startIngestServer({
   token,
   submit = ingest.submit,
   maxBodyBytes = MAX_BODY_BYTES,
+  onError, // optional: called if the listen fails (e.g. EADDRINUSE)
 } = {}) {
   const authToken = token ?? getOrCreateToken();
   const startedAt = Date.now();
@@ -389,6 +390,25 @@ export function startIngestServer({
     } catch {
       if (!res.headersSent) send(res, 500, { error: 'internal error' });
     }
+  });
+
+  // A busy port must never take the app down. Orbit is fully usable without the
+  // REST endpoint — the in-process readers still run and the dashboard still
+  // works; only external emitters can't deliver. So surface it and carry on,
+  // rather than letting an unhandled 'error' event reach the main process and
+  // kill Electron with a raw exception dialog.
+  server.on('error', (err) => {
+    if (err && err.code === 'EADDRINUSE') {
+      console.warn(
+        `[orbit] port ${port} is already in use — the REST ingest endpoint is ` +
+          `disabled for this session. Another copy of NX Orbit is probably ` +
+          `running, or something else holds the port. In-process sources still work.`
+      );
+    } else {
+      console.warn('[orbit] ingest server error:', err && err.message);
+    }
+    server.lastError = err;
+    if (typeof onError === 'function') onError(err);
   });
 
   server.listen(port, '127.0.0.1');

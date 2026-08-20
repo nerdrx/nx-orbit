@@ -140,7 +140,20 @@ async function bootstrap() {
   registerIpc({ sources });
 
   const token = getOrCreateToken();
-  ingestServer = startIngestServer({ port: ingestPort, token });
+  ingestServer = startIngestServer({
+    port: ingestPort,
+    token,
+    // A busy port disables external emitters but leaves the rest of the app
+    // working, so tell the renderer instead of dying (see ingest-server.js).
+    onError: (err) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('orbit:sources.serverError', {
+          code: err?.code ?? 'UNKNOWN',
+          port: ingestPort,
+        });
+      }
+    },
+  });
   console.log(`[orbit] ingest endpoint on 127.0.0.1:${ingestPort}`);
 
   // First scan, then run readers on a timer.
@@ -153,7 +166,25 @@ async function bootstrap() {
   createWindow();
 }
 
-app.whenReady().then(bootstrap);
+// One Orbit per machine. Without this a second launch races the first for the
+// ingest port and for SQLite, and the loser died with a raw JavaScript-error
+// dialog. Now the second copy hands off and exits; the running one comes
+// forward, which is what the person double-clicking the icon actually wanted.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    } else {
+      createWindow();
+    }
+  });
+
+  app.whenReady().then(bootstrap);
+}
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
