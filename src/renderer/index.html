@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data:; font-src 'self' file:; connect-src 'self'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NX Orbit</title>
+    <!-- tokens first (frozen brand), then this app's compositions -->
+    <link rel="stylesheet" href="./tokens.css" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <!-- The light the glass refracts: three slow blobs under everything. -->
+    <div id="nebula" class="nebula" aria-hidden="true">
+      <span class="neb neb-1"></span>
+      <span class="neb neb-2"></span>
+      <span class="neb neb-3"></span>
+    </div>
+
+    <div class="shell">
+      <!-- Left glass rail — the view switcher. Tier-1 fake glass. -->
+      <nav id="rail" class="rail" aria-label="Views">
+        <div class="rail-brand">
+          <span class="mark" aria-hidden="true"></span>
+          <span class="rail-brand-text">
+            <b>Orbit</b>
+            <small>local only</small>
+          </span>
+        </div>
+        <div class="rail-nav" role="tablist" aria-orientation="vertical">
+          <button class="rail-item" role="tab" data-view="now"     aria-selected="true">
+            <span class="ri-ico" data-ico="now"></span><span class="ri-label">Now</span>
+          </button>
+          <button class="rail-item" role="tab" data-view="heatmap" aria-selected="false">
+            <span class="ri-ico" data-ico="heatmap"></span><span class="ri-label">Heatmap</span>
+          </button>
+          <button class="rail-item" role="tab" data-view="people"  aria-selected="false">
+            <span class="ri-ico" data-ico="people"></span><span class="ri-label">People</span>
+          </button>
+          <button class="rail-item" role="tab" data-view="changes" aria-selected="false">
+            <span class="ri-ico" data-ico="changes"></span><span class="ri-label">Changes</span>
+          </button>
+          <button class="rail-item" role="tab" data-view="add"     aria-selected="false">
+            <span class="ri-ico" data-ico="add"></span><span class="ri-label">Add</span>
+          </button>
+          <button class="rail-item" role="tab" data-view="sources" aria-selected="false">
+            <span class="ri-ico" data-ico="sources"></span><span class="ri-label">Sources</span>
+          </button>
+        </div>
+        <div class="rail-foot">
+          <span class="dot-live" aria-hidden="true"></span>
+          <span id="rail-online">—</span>
+        </div>
+      </nav>
+
+      <main id="main" class="main" aria-live="polite"></main>
+    </div>
+
+    <div id="sheet-root"></div>
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+
+    <!-- mock first (installs window.orbit only if Electron isn't behind us),
+         then the controller. Both are ES modules; app.js imports the mock. -->
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

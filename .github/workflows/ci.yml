@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Node 24: node:sqlite is unflagged there (matches Electron 40's bundled Node).
+          node-version: '24'
+      - name: Install
+        run: npm ci --ignore-scripts
+      - name: Unit tests
+        # Pure-Node: db, ingest validation, digest derivations, plugin mapping.
+        # Electron is not needed (and not downloaded) for these.
+        # Glob, not `test/` — a bare directory positional is resolved as a module
+        # entry on Node 24+ and errors before any test loads.
+        run: node --test test/*.test.js
+
+  charter:
+    name: Charter check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No observation kinds outside the SPEC enum
+        # The enum IS the enforcement (SPEC §2.2). If someone adds a kind, it must
+        # be a deliberate SPEC change, not an accident in a plugin.
+        run: |
+          set -uo pipefail
+          # Collect kind:"..." literals from source, compare against the allowed set.
+          allowed=" presence status location bio nick avatar friend "
+          fail=0
+          while IFS= read -r k; do
+            [ -z "$k" ] && continue
+            case "$allowed" in
+              *" $k "*) echo "ok: $k" ;;
+              *) echo "::error::observation kind '$k' is outside the SPEC §2.2 enum"; fail=1 ;;
+            esac
+          done < <(grep -rhoE 'kind:[[:space:]]*"[a-z_]+"' src plugins \
+                     --include='*.js' --include='*.ts' 2>/dev/null \
+                   | sed -E 's/.*"([a-z_]+)"/\1/' | sort -u)
+          exit $fail
+      - name: No outbound network beyond loopback
+        # SPEC §0.2: local only. Plugins POST to 127.0.0.1; nothing may phone home.
+        run: |
+          set -euo pipefail
+          if grep -rnE 'https?://(?!127\.0\.0\.1|localhost)' src --include='*.js' -P \
+             | grep -vE '^\s*//|\*|cdn\.discordapp\.com|api\.vrchat\.cloud|pbs\.twimg\.com' ; then
+            echo "::error::non-loopback URL in src/ — see SPEC §0.2 (local only)"
+            exit 1
+          fi
+          echo "ok: no unexpected outbound hosts"

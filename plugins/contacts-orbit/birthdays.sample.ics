@@ -1,0 +1,34 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//nx-orbit//contacts-orbit sample//EN
+BEGIN:VEVENT
+UID:bday-0001@example.invalid
+DTSTART;VALUE=DATE:19900517
+RRULE:FREQ=YEARLY
+SUMMARY:Priya Raman
+CATEGORIES:Birthday
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:bday-0002@example.invalid
+DTSTART;VALUE=DATE:20100714
+RRULE:FREQ=YEARLY
+SUMMARY:Tomás Vega's Birthday
+END:VEVENT
+BEGIN:VEVENT
+UID:bday-0003@example.invalid
+DTSTART;VALUE=DATE:19910423
+RRULE:FREQ=YEARLY
+SUMMARY:Birthday of Ada Ramirez
+DESCRIPTION:The same human as the Ada Ramirez vCard\, and she still arrives as
+  a SECOND person row: Orbit never auto-links identities (SPEC 2.1) — you do t
+ hat in the UI.
+X-CONTACTS-BIRTHDAY:TRUE
+END:VEVENT
+BEGIN:VEVENT
+UID:meeting-0004@example.invalid
+DTSTART:20260820T140000Z
+DTEND:20260820T150000Z
+SUMMARY:Dentist
+END:VEVENT
+END:VCALENDAR

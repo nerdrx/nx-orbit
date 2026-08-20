@@ -1,0 +1,56 @@
+{
+  "name": "nx-orbit",
+  "productName": "NX Orbit",
+  "version": "0.1.0",
+  "description": "Local-first dashboard for keeping up with the friends you already have — consent-based, no cloud, no AI-over-people",
+  "main": "src/main/index.js",
+  "type": "module",
+  "author": "nerdrx",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "headless": "bash scripts/headless_test.sh",
+    "dist:linux": "electron-builder --linux --publish never",
+    "dist:win": "electron-builder --win --publish never"
+  },
+  "devDependencies": {
+    "electron": "^40.4.1",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.nxorbit.app",
+    "productName": "NX Orbit",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json",
+      "!test/**/*",
+      "!dist/**/*"
+    ],
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icons",
+      "category": "Utility",
+      "artifactName": "NX-Orbit-${version}-linux.${ext}",
+      "synopsis": "Keep up with the friends you already have — local-first, consent-based",
+      "desktop": {
+        "GenericName": "Friend Dashboard",
+        "StartupWMClass": "NX Orbit",
+        "Keywords": "nx;friends;presence;birthdays;dashboard;"
+      }
+    },
+    "win": {
+      "target": "portable",
+      "icon": "assets/icon.ico",
+      "artifactName": "NX-Orbit-${version}-windows-portable.${ext}"
+    }
+  },
+  "allowScripts": {
+    "electron@40.4.1": true,
+    "electron-builder@24.13.3": true
+  }
+}

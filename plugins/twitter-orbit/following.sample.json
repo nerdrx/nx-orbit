@@ -1,0 +1,25 @@
+{
+  "data": [
+    {
+      "id": "44196397",
+      "username": "elonmusk",
+      "name": "Elon Musk",
+      "description": "",
+      "profile_image_url": "https://pbs.twimg.com/profile_images/1900000000000000000/abcd1234_normal.jpg"
+    },
+    {
+      "id": "12",
+      "username": "jack",
+      "name": "jack",
+      "description": "bitcoin & nostr. block head.",
+      "profile_image_url": "https://pbs.twimg.com/profile_images/1500000000000000000/wxyz5678_normal.jpg"
+    },
+    {
+      "id": "2244994945",
+      "username": "TwitterDev",
+      "name": "Developers",
+      "description": "🏖 out of office until the 20th — DMs closed. The X Dev account.",
+      "profile_image_url": "https://pbs.twimg.com/profile_images/1600000000000000000/devpic_normal.jpg"
+    }
+  ]
+}

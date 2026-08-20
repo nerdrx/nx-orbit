@@ -1,0 +1,136 @@
+{
+  "_comment": "Offline fixture for `node index.js --from-fixture fixture.sample.json --dry-run`. Keys are Last.fm API method names and the values are verbatim response bodies: `user.getFriends` is an ARRAY of pages (the live client pages through them), and `user.getRecentTracks` is keyed by username. Covers: a now-playing friend, a friend whose last track is a finished scrobble with date.uts, a friend with an empty recent-tracks list, a friend whose feed is unavailable (null), and the single-object-instead-of-array quirk the API has when a list holds exactly one item.",
+
+  "user.getInfo": {
+    "user": {
+      "name": "nerdrx",
+      "realname": "nerdrx",
+      "url": "https://www.last.fm/user/nerdrx",
+      "country": "Germany",
+      "playcount": "148213",
+      "registered": { "unixtime": "1330560000", "#text": 1330560000 },
+      "image": [
+        { "size": "small", "#text": "https://lastfm.freetls.fastly.net/i/u/34s/self.png" },
+        { "size": "medium", "#text": "https://lastfm.freetls.fastly.net/i/u/64s/self.png" },
+        { "size": "large", "#text": "https://lastfm.freetls.fastly.net/i/u/174s/self.png" },
+        { "size": "extralarge", "#text": "https://lastfm.freetls.fastly.net/i/u/300x300/self.png" }
+      ]
+    }
+  },
+
+  "user.getFriends": [
+    {
+      "friends": {
+        "@attr": { "user": "nerdrx", "page": "1", "perPage": "50", "totalPages": "2", "total": "4" },
+        "user": [
+          {
+            "name": "ariaplays",
+            "realname": "Aria",
+            "url": "https://www.last.fm/user/ariaplays",
+            "country": "None",
+            "playcount": "62110",
+            "subscriber": "0",
+            "image": [
+              { "size": "small", "#text": "https://lastfm.freetls.fastly.net/i/u/34s/aria.png" },
+              { "size": "medium", "#text": "https://lastfm.freetls.fastly.net/i/u/64s/aria.png" },
+              { "size": "large", "#text": "https://lastfm.freetls.fastly.net/i/u/174s/aria.png" },
+              { "size": "extralarge", "#text": "https://lastfm.freetls.fastly.net/i/u/300x300/aria.png" }
+            ]
+          },
+          {
+            "name": "kazmusic",
+            "realname": "",
+            "url": "https://www.last.fm/user/kazmusic",
+            "country": "Japan",
+            "playcount": "9021",
+            "subscriber": "0",
+            "image": [
+              { "size": "small", "#text": "https://lastfm.freetls.fastly.net/i/u/34s/kaz.png" },
+              { "size": "large", "#text": "https://lastfm.freetls.fastly.net/i/u/174s/kaz.png" }
+            ]
+          },
+          {
+            "name": "quietlistener",
+            "realname": "June",
+            "url": "https://www.last.fm/user/quietlistener",
+            "country": "None",
+            "playcount": "1204",
+            "subscriber": "0",
+            "image": [{ "size": "medium", "#text": "" }]
+          }
+        ]
+      }
+    },
+    {
+      "friends": {
+        "@attr": { "user": "nerdrx", "page": "2", "perPage": "50", "totalPages": "2", "total": "4" },
+        "user": {
+          "name": "privatepete",
+          "realname": "Pete",
+          "url": "https://www.last.fm/user/privatepete",
+          "country": "None",
+          "playcount": "77",
+          "subscriber": "0",
+          "image": [{ "size": "large", "#text": "https://lastfm.freetls.fastly.net/i/u/174s/pete.png" }]
+        }
+      }
+    }
+  ],
+
+  "user.getRecentTracks": {
+    "nerdrx": {
+      "recenttracks": {
+        "@attr": { "user": "nerdrx", "page": "1", "perPage": "1", "totalPages": "148213", "total": "148213" },
+        "track": {
+          "artist": { "mbid": "", "#text": "Boards of Canada" },
+          "name": "Roygbiv",
+          "album": { "mbid": "", "#text": "Music Has the Right to Children" },
+          "url": "https://www.last.fm/music/Boards+of+Canada/_/Roygbiv",
+          "image": [{ "size": "large", "#text": "https://lastfm.freetls.fastly.net/i/u/174s/mhtrtc.png" }],
+          "@attr": { "nowplaying": "true" }
+        }
+      }
+    },
+
+    "ariaplays": {
+      "recenttracks": {
+        "@attr": { "user": "ariaplays", "page": "1", "perPage": "1", "totalPages": "62110", "total": "62110" },
+        "track": [
+          {
+            "artist": { "mbid": "", "#text": "Alix Perez" },
+            "name": "Forsaken",
+            "album": { "mbid": "", "#text": "1984" },
+            "url": "https://www.last.fm/music/Alix+Perez/_/Forsaken",
+            "image": [{ "size": "large", "#text": "https://lastfm.freetls.fastly.net/i/u/174s/1984.png" }],
+            "@attr": { "nowplaying": "true" }
+          }
+        ]
+      }
+    },
+
+    "kazmusic": {
+      "recenttracks": {
+        "@attr": { "user": "kazmusic", "page": "1", "perPage": "1", "totalPages": "9021", "total": "9021" },
+        "track": [
+          {
+            "artist": { "mbid": "", "#text": "Fishmans" },
+            "name": "Long Season",
+            "album": { "mbid": "", "#text": "Long Season" },
+            "url": "https://www.last.fm/music/Fishmans/_/Long+Season",
+            "image": [{ "size": "large", "#text": "https://lastfm.freetls.fastly.net/i/u/174s/ls.png" }],
+            "date": { "uts": "1755630000", "#text": "19 Aug 2025, 19:00" }
+          }
+        ]
+      }
+    },
+
+    "quietlistener": {
+      "recenttracks": {
+        "@attr": { "user": "quietlistener", "page": "1", "perPage": "1", "totalPages": "0", "total": "0" },
+        "track": []
+      }
+    },
+
+    "privatepete": null
+  }
+}

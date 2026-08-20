@@ -1,0 +1,56 @@
+BEGIN:VCARD
+VERSION:3.0
+UID:urn:uuid:6f0a1b3c-1111-4a2b-9c3d-000000000001
+N:Ramirez;Ada;;;
+FN:Ada Ramirez
+NICKNAME:adarama,ada
+BDAY:1991-04-23
+NOTE:met at Framework's world\, likes DnB. Ask about the modular synth\; she
+  is building one.
+EMAIL;TYPE=INTERNET:ada@example.invalid
+TEL;TYPE=CELL:+1 555 0100
+END:VCARD
+BEGIN:VCARD
+VERSION:4.0
+UID:urn:uuid:6f0a1b3c-1111-4a2b-9c3d-000000000002
+FN:Bo Lindqvist
+NICKNAME:bo
+BDAY:--0517
+NOTE:Does not share the year\, and that is fine — Orbit keeps it as MM-DD. Lo
+ ves cold-water swimming and will tell you about it.
+END:VCARD
+BEGIN:VCARD
+VERSION:2.1
+FN;CHARSET=UTF-8;ENCODING=QUOTED-PRINTABLE:Zo=C3=AB Sm=C3=ADth
+N;CHARSET=UTF-8;ENCODING=QUOTED-PRINTABLE:Sm=C3=ADth;Zo=C3=AB;;;
+BDAY:19851124
+NOTE;CHARSET=UTF-8;ENCODING=QUOTED-PRINTABLE:met at the Berlin meetup=0A=
+brings the good coffee
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+UID:apple-abcd-0004
+FN:Kenji Watanabe
+BDAY;X-APPLE-OMIT-YEAR=1604:1604-03-09
+item1.X-ABDATE:1604-03-09
+item1.X-ABLABEL:_$!<Anniversary>!$_
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+UID:apple-abcd-0005
+FN:Marisol Vega
+item1.X-ABDATE:1993-08-02
+item1.X-ABLABEL:Birthday
+END:VCARD
+BEGIN:VCARD
+VERSION:2.1
+FN:Tomas Nowak
+N:Nowak;Tomas;;;
+X-ANDROID-CUSTOM:vnd.android.cursor.item/contact_event;1988-12-30;3;;;;;;;;;;;;;
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+UID:urn:uuid:6f0a1b3c-1111-4a2b-9c3d-000000000007
+FN:No Birthday Here
+NOTE:Skipped unless you pass --all.
+END:VCARD

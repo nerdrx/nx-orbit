@@ -1,0 +1,101 @@
+{
+  "_comment": "Offline fixture for `node index.js --from-fixture fixture.sample.json --dry-run`. It mirrors real Mastodon API response shapes: `verify_credentials` is the body of GET /api/v1/accounts/verify_credentials, and each entry of `following_pages` is one page of GET /api/v1/accounts/:id/following — `link` is that page's verbatim Link header, so the pagination loop and the rel=\"next\" parser are exercised for real. Page 3 has no Link header, which is how Mastodon signals the last page.",
+
+  "verify_credentials": {
+    "id": "108176",
+    "username": "nerdrx",
+    "acct": "nerdrx",
+    "display_name": "nerdrx",
+    "url": "https://mastodon.example/@nerdrx",
+    "note": "<p>NX things.</p>",
+    "avatar": "https://files.mastodon.example/accounts/avatars/108/176/original/a1b2c3.png",
+    "avatar_static": "https://files.mastodon.example/accounts/avatars/108/176/original/a1b2c3.png",
+    "followers_count": 212,
+    "following_count": 4,
+    "fields": []
+  },
+
+  "following_pages": [
+    {
+      "link": "<https://mastodon.example/api/v1/accounts/108176/following?limit=80&max_id=7702>; rel=\"next\", <https://mastodon.example/api/v1/accounts/108176/following?limit=80&since_id=7710>; rel=\"prev\"",
+      "accounts": [
+        {
+          "id": "7710",
+          "username": "aria",
+          "acct": "aria",
+          "display_name": "Aria ✨",
+          "url": "https://mastodon.example/@aria",
+          "note": "<p>Synth builder, DnB enjoyer.<br />Commissions: <a href=\"https://aria.example\"><span class=\"invisible\">https://</span>aria.example</a></p><p>she/her &amp; occasionally they/them</p>",
+          "avatar": "https://files.mastodon.example/accounts/avatars/000/007/710/original/aria-v3.png",
+          "avatar_static": "https://files.mastodon.example/accounts/avatars/000/007/710/original/aria-v3.png",
+          "locked": false,
+          "bot": false,
+          "created_at": "2021-03-04T00:00:00.000Z",
+          "fields": [
+            { "name": "Pronouns", "value": "she/her", "verified_at": null },
+            { "name": "Birthday", "value": "1994-05-12", "verified_at": null },
+            { "name": "Website", "value": "<a href=\"https://aria.example\">aria.example</a>", "verified_at": "2024-01-09T12:00:00.000+00:00" }
+          ]
+        },
+        {
+          "id": "7708",
+          "username": "kaz",
+          "acct": "kaz@fedi.example",
+          "display_name": "kaz",
+          "url": "https://fedi.example/@kaz",
+          "note": "<p>🏖 away till the 20th &mdash; slow replies</p>",
+          "avatar": "https://files.mastodon.example/cache/accounts/avatars/000/007/708/original/kaz.jpg",
+          "avatar_static": "https://files.mastodon.example/cache/accounts/avatars/000/007/708/original/kaz.jpg",
+          "locked": false,
+          "bot": false,
+          "created_at": "2019-11-30T00:00:00.000Z",
+          "fields": [
+            { "name": "pronoun", "value": "he/him", "verified_at": null },
+            { "name": "born", "value": "March 3", "verified_at": null }
+          ]
+        }
+      ]
+    },
+    {
+      "link": "<https://mastodon.example/api/v1/accounts/108176/following?limit=80&max_id=7690>; rel=\"next\"",
+      "accounts": [
+        {
+          "id": "7702",
+          "username": "orbitbot",
+          "acct": "orbitbot@bots.example",
+          "display_name": "",
+          "url": "https://bots.example/@orbitbot",
+          "note": "",
+          "avatar": "https://bots.example/avatars/orbitbot.png",
+          "avatar_static": "https://bots.example/avatars/orbitbot.png",
+          "locked": false,
+          "bot": true,
+          "created_at": "2023-06-01T00:00:00.000Z",
+          "fields": []
+        }
+      ]
+    },
+    {
+      "accounts": [
+        {
+          "id": "7690",
+          "username": "june",
+          "acct": "june",
+          "display_name": "June",
+          "url": "https://mastodon.example/@june",
+          "note": "<p>zines &amp; bikes</p>",
+          "avatar": "https://files.mastodon.example/accounts/avatars/000/007/690/original/june.png",
+          "avatar_static": "https://files.mastodon.example/accounts/avatars/000/007/690/original/june.png",
+          "locked": true,
+          "bot": false,
+          "created_at": "2020-08-08T00:00:00.000Z",
+          "fields": [
+            { "name": "PRONOUNS", "value": "they/them", "verified_at": null },
+            { "name": "bday", "value": "18/07", "verified_at": null },
+            { "name": "Fav colour", "value": "03/04", "verified_at": null }
+          ]
+        }
+      ]
+    }
+  ]
+}

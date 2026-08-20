@@ -1,0 +1,10 @@
+node_modules/
+dist/
+out/
+*.log
+.DS_Store
+# never commit anyone's data or the local ingest token
+*.sqlite3
+*.sqlite3-*
+ingest.token
+scratch/

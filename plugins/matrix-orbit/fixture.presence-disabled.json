@@ -1,0 +1,22 @@
+{
+  "_comment": "The common real-world case: a homeserver with presence turned off (Synapse's default `use_presence: false`, and matrix.org itself). EVERY /presence call is refused with 403 M_FORBIDDEN. The plugin must degrade to a roster-only run — persons still emitted, zero presence observations, a clear note on stderr, exit code 0 — rather than failing.",
+
+  "whoami": { "user_id": "@nerdrx:matrix.example", "device_id": "ORBITDEV01" },
+
+  "m.direct": {
+    "@aria:matrix.example": ["!aBcDeF:matrix.example"],
+    "@kaz:fedi.example": ["!gHiJkL:matrix.example"]
+  },
+
+  "profiles": {
+    "@nerdrx:matrix.example": { "displayname": "nerdrx", "avatar_url": "mxc://matrix.example/SelfAvatarMediaId01" },
+    "@aria:matrix.example": { "displayname": "Aria ✨", "avatar_url": "mxc://matrix.example/AriaAvatarMediaId02" },
+    "@kaz:fedi.example": { "displayname": "kaz" }
+  },
+
+  "presence": {
+    "@nerdrx:matrix.example": { "_status": 403, "errcode": "M_FORBIDDEN", "error": "Presence is not activated on this homeserver" },
+    "@aria:matrix.example": { "_status": 403, "errcode": "M_FORBIDDEN", "error": "Presence is not activated on this homeserver" },
+    "@kaz:fedi.example": { "_status": 403, "errcode": "M_FORBIDDEN", "error": "Presence is not activated on this homeserver" }
+  }
+}

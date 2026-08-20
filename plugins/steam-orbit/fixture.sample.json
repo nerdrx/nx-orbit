@@ -1,0 +1,94 @@
+{
+  "_comment": "Saved Steam Web API responses for offline testing: node index.js --dry-run --from-fixture fixture.sample.json. Covers personastate 0-6, one friend in-game, one private profile with no visible state, and realname/timecreated fields that steam-orbit deliberately drops.",
+  "steamid": "76561198000000001",
+  "friends": {
+    "friendslist": {
+      "friends": [
+        { "steamid": "76561198000000010", "relationship": "friend", "friend_since": 1520000000 },
+        { "steamid": "76561198000000011", "relationship": "friend", "friend_since": 1530000000 },
+        { "steamid": "76561198000000012", "relationship": "friend", "friend_since": 1540000000 },
+        { "steamid": "76561198000000013", "relationship": "friend", "friend_since": 1550000000 },
+        { "steamid": "76561198000000014", "relationship": "friend", "friend_since": 1560000000 },
+        { "steamid": "76561198000000015", "relationship": "friend", "friend_since": 1570000000 },
+        { "steamid": "76561198000000016", "relationship": "friend", "friend_since": 1580000000 },
+        { "steamid": "76561198000000017", "relationship": "friend", "friend_since": 0 },
+        { "steamid": "76561198000000099", "relationship": "requestrecipient", "friend_since": 1590000000 }
+      ]
+    }
+  },
+  "summaries": {
+    "response": {
+      "players": [
+        {
+          "steamid": "76561198000000001",
+          "communityvisibilitystate": 3,
+          "personaname": "nerdrx",
+          "avatarfull": "https://avatars.steamstatic.com/aa00000000000000000000000000000000000001_full.jpg",
+          "personastate": 1,
+          "gameextrainfo": "Half-Life: Alyx",
+          "timecreated": 1200000000
+        },
+        {
+          "steamid": "76561198000000010",
+          "communityvisibilitystate": 3,
+          "personaname": "offline_owl",
+          "avatarfull": "https://avatars.steamstatic.com/aa00000000000000000000000000000000000010_full.jpg",
+          "personastate": 0,
+          "realname": "Should Never Be Emitted",
+          "timecreated": 1300000000
+        },
+        {
+          "steamid": "76561198000000011",
+          "communityvisibilitystate": 3,
+          "personaname": "online_otter",
+          "avatarfull": "https://avatars.steamstatic.com/aa00000000000000000000000000000000000011_full.jpg",
+          "personastate": 1,
+          "gameextrainfo": "Deep Rock Galactic"
+        },
+        {
+          "steamid": "76561198000000012",
+          "communityvisibilitystate": 3,
+          "personaname": "busy_badger",
+          "avatarfull": "https://avatars.steamstatic.com/aa00000000000000000000000000000000000012_full.jpg",
+          "personastate": 2
+        },
+        {
+          "steamid": "76561198000000013",
+          "communityvisibilitystate": 3,
+          "personaname": "away_axolotl",
+          "avatarfull": "https://avatars.steamstatic.com/aa00000000000000000000000000000000000013_full.jpg",
+          "personastate": 3,
+          "realname": "Also Dropped"
+        },
+        {
+          "steamid": "76561198000000014",
+          "communityvisibilitystate": 3,
+          "personaname": "snooze_swan",
+          "avatarfull": "https://avatars.steamstatic.com/aa00000000000000000000000000000000000014_full.jpg",
+          "personastate": 4
+        },
+        {
+          "steamid": "76561198000000015",
+          "communityvisibilitystate": 3,
+          "personaname": "trade_toad",
+          "avatarfull": "https://avatars.steamstatic.com/aa00000000000000000000000000000000000015_full.jpg",
+          "personastate": 5
+        },
+        {
+          "steamid": "76561198000000016",
+          "communityvisibilitystate": 3,
+          "personaname": "lfg_lynx",
+          "avatarfull": "https://avatars.steamstatic.com/aa00000000000000000000000000000000000016_full.jpg",
+          "personastate": 6,
+          "gameextrainfo": "Left 4 Dead 2"
+        },
+        {
+          "steamid": "76561198000000017",
+          "communityvisibilitystate": 1,
+          "personaname": "private_pangolin",
+          "avatarfull": "https://avatars.steamstatic.com/aa00000000000000000000000000000000000017_full.jpg"
+        }
+      ]
+    }
+  }
+}

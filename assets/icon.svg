@@ -1,0 +1,33 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NX Orbit">
+  <defs>
+    <linearGradient id="facet" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#b58cff"/>
+      <stop offset="0.34" stop-color="#7700ff"/>
+      <stop offset="1" stop-color="#2a0b52"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#00e5ff"/>
+      <stop offset="1" stop-color="#7700ff"/>
+    </linearGradient>
+    <radialGradient id="field" cx="0.4" cy="0.35" r="0.75">
+      <stop offset="0" stop-color="#12091f"/>
+      <stop offset="1" stop-color="#0a0714"/>
+    </radialGradient>
+  </defs>
+  <rect width="256" height="256" rx="28" fill="url(#field)"/>
+  <!-- orbit path: a friend point riding an elliptical ring around the crystal core -->
+  <ellipse cx="128" cy="128" rx="86" ry="52" fill="none" stroke="url(#ring)" stroke-width="4"
+           opacity="0.55" transform="rotate(-24 128 128)"/>
+  <!-- the NX crystal core (pointy-top faceted hexagon) -->
+  <g transform="translate(128 128)">
+    <polygon points="0,-46 40,-23 40,23 0,46 -40,23 -40,-23" fill="url(#facet)" stroke="rgba(226,200,255,0.5)" stroke-width="2"/>
+    <polygon points="0,-46 40,-23 0,0 -40,-23" fill="rgba(255,255,255,0.16)"/>
+    <polygon points="-40,-23 0,0 -40,23" fill="rgba(0,0,0,0.22)"/>
+  </g>
+  <!-- the live friend, a cyan point on the ring (upper-right) -->
+  <circle cx="196" cy="94" r="10" fill="#00e5ff"/>
+  <circle cx="196" cy="94" r="10" fill="none" stroke="#00e5ff" stroke-width="3" opacity="0.35">
+    <animate attributeName="r" values="10;16;10" dur="3s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.35;0;0.35" dur="3s" repeatCount="indefinite"/>
+  </circle>
+</svg>

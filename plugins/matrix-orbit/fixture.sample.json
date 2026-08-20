@@ -1,0 +1,63 @@
+{
+  "_comment": "Offline fixture for `node index.js --from-fixture fixture.sample.json --dry-run`. Keys mirror the Matrix client-server endpoints this plugin calls: whoami = GET /_matrix/client/v3/account/whoami, m.direct = GET /_matrix/client/v3/user/{me}/account_data/m.direct, profiles = GET /_matrix/client/v3/profile/{userId}, presence = GET /_matrix/client/v3/presence/{userId}/status. A presence entry carrying `_status` models the homeserver REFUSING that call (403/404), which is what a presence-disabled server does. Covers online, unavailable+status_msg, offline+status_msg, a refused presence, a note-to-self DM (ignored), and a stale m.direct entry with no rooms (ignored).",
+
+  "whoami": { "user_id": "@nerdrx:matrix.example", "device_id": "ORBITDEV01" },
+
+  "m.direct": {
+    "@aria:matrix.example": ["!aBcDeF:matrix.example"],
+    "@kaz:fedi.example": ["!gHiJkL:matrix.example", "!mNoPqR:matrix.example"],
+    "@june:matrix.example": ["!sTuVwX:matrix.example"],
+    "@quiet:matrix.example": ["!yZaBcD:matrix.example"],
+    "@nerdrx:matrix.example": ["!selfnote:matrix.example"],
+    "@ghost:gone.example": []
+  },
+
+  "profiles": {
+    "@nerdrx:matrix.example": {
+      "displayname": "nerdrx",
+      "avatar_url": "mxc://matrix.example/SelfAvatarMediaId01"
+    },
+    "@aria:matrix.example": {
+      "displayname": "Aria ✨",
+      "avatar_url": "mxc://matrix.example/AriaAvatarMediaId02"
+    },
+    "@kaz:fedi.example": {
+      "displayname": "kaz",
+      "avatar_url": "mxc://fedi.example/KazAvatarMediaId03"
+    },
+    "@june:matrix.example": {
+      "displayname": "June"
+    },
+    "@quiet:matrix.example": {}
+  },
+
+  "presence": {
+    "@nerdrx:matrix.example": {
+      "presence": "online",
+      "last_active_ago": 1500,
+      "currently_active": true
+    },
+    "@aria:matrix.example": {
+      "presence": "online",
+      "last_active_ago": 42000,
+      "currently_active": true,
+      "status_msg": "🏖 away till the 20th — slow replies"
+    },
+    "@kaz:fedi.example": {
+      "presence": "unavailable",
+      "last_active_ago": 930000,
+      "currently_active": false,
+      "status_msg": "brb, coffee"
+    },
+    "@june:matrix.example": {
+      "presence": "offline",
+      "last_active_ago": 86400000,
+      "currently_active": false
+    },
+    "@quiet:matrix.example": {
+      "_status": 403,
+      "errcode": "M_FORBIDDEN",
+      "error": "Presence is not activated on this homeserver"
+    }
+  }
+}
