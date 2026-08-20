@@ -26,6 +26,20 @@ inverse of a people-profiler. Every contribution is measured against it:
 If you're unsure whether an idea fits, open an issue describing it in terms of
 "what a friend would see and feel." That framing usually answers it.
 
+## Test data, fixtures and mocks must be invented
+
+Never paste a real person into this repository. Not a display name, not a
+handle, not a bio, not a user id, not a status message — and not "just as a
+tricky Unicode example," which is exactly how a real friend's name once ended up
+in `src/renderer/mock.js`. The same goes for places: which venues someone
+frequents is itself personal, so invent world and server names too.
+
+If you need a pathological case (RTL overrides, zalgo, astral-plane glyphs,
+76-character walls), construct one. `mock.js` shows how — the hard names are
+built from escapes and generators, and every one of them is made up. A repo
+whose whole point is not collecting people should not ship people in its
+fixtures.
+
 ## What we will not accept, ever
 
 - A `kind`, field, or plugin that carries message/DM content, keystrokes,

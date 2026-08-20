@@ -91,11 +91,13 @@ if (!window.orbit) {
   // escapes rather than pasted glyphs so the file stays byte-stable through any
   // editor, patch tool or checkout that is unsure about UTF-8.
   const HARD_NAMES = [
-    // ༻༒S₱Ɇ₵₮ЯɆӾ༒༺ — Tibetan brackets around currency-symbol letterforms
-    { handle: 'spectrex',    displayName: '༻༒S₱Ɇ₵₮ЯɆӾ༒༺' },
+    // ༻༒₦ɆƁUⱠ₳₦₳U₮༒༺ — Tibetan brackets around currency-symbol letterforms.
+    // Invented, like every name in this file: mock data must never contain a
+    // real person lifted from someone's actual friends list.
+    { handle: 'nebulanaut',  displayName: '༻༒₦ɆƁUⱠ₳₦₳U₮༒༺' },
     // ✟ANNI✟
     { handle: 'anni',        displayName: '✟ANNI✟' },
-    { handle: 'rooftopdj',   displayName: 'xX_the_one_and_only_midnight_rooftop_dj_who_absolutely_never_sleeps_Xx' },
+    { handle: 'rooftopdj',   displayName: 'xX_the_one_and_only_starlit_terrace_dj_who_absolutely_never_sleeps_Xx' },
     // wide CJK + kana + latin in one name
     { handle: 'yukikaze',    displayName: '雪風・ゆきかぜ・Snow Wind' },
     // long Hangul with no spaces to break on
@@ -135,7 +137,7 @@ if (!window.orbit) {
   // Ordinary procedural names — the other ~93% of a roster.
   const SYL_A = ['ka', 'mi', 'ru', 'ne', 'sa', 'to', 'ly', 'vex', 'no', 'ze', 'ari', 'bel', 'cyn', 'dra', 'elo', 'fen', 'gal', 'hex', 'iri', 'jun', 'kes', 'lum', 'mor', 'nix', 'ori', 'pyx', 'qua', 'ren', 'syl', 'tas', 'umb', 'vel', 'wis', 'xan', 'yri', 'zae', 'ash', 'bra', 'cor', 'del'];
   const SYL_B = ['ra', 'na', 'th', 'va', 'ko', 'mi', 'sha', 'lex', 'dor', 'wyn', 'ette', 'ix', 'os', 'ara', 'elle', 'ion', 'uxe', 'ynn', 'ade', 'ora', 'ley', 'iel', 'un', 'ka'];
-  const SURNAME = ['', '', '', '', ' Vale', ' Ashgrove', ' Winterhold', ' of the Pug', ' Nine', ' Radio', ' Sixteen', ' Lark'];
+  const SURNAME = ['', '', '', '', ' Vale', ' Ashgrove', ' Winterhold', ' of the Ferret', ' Nine', ' Radio', ' Sixteen', ' Lark'];
   const CJK_CH = ['雪', '星', '夜', '月', '風', '光', '海', '桜', '空', '影', '花', '雷', '霧', '翼', '葵', '琴', '杉', '霧'];
   const HANGUL = ['하늘', '별빛', '도윤', '서연', '바다', '달빛'];
   const CYRILLIC = ['Алекс', 'Мила', 'Ника', 'Соня', 'Даша', 'Юра'];
@@ -163,7 +165,7 @@ if (!window.orbit) {
   }
 
   // -- flavour pools ---------------------------------------------------------
-  const PLACES = ['Framework Hangout', 'The Great Pug', 'Midnight Rooftop', 'Murder Barn', 'Cyber Dream Club', 'Just B Club', 'Prismatic Void', 'The Black Cat', 'Rainy Alley', 'Summer Festival Grounds', 'Quiet Library', 'Room of the Rain'];
+  const PLACES = ['Framework Hangout', 'The Copper Ferret', 'Starlit Terrace', 'Hollow Barn', 'Cyber Dream Club', 'Club Meridian', 'Prismatic Void', 'The Velvet Moth', 'Rainy Alley', 'Summer Festival Grounds', 'Quiet Library', 'Room of the Rain'];
   const STATUSES = [
     '🏖 away till the 20th',
     'grinding shader homework',
@@ -199,13 +201,13 @@ if (!window.orbit) {
   // Person id is `${source}:${sourceId}` — matches the real core.
   const CURATED = [
     { source: 'vrcx',    sourceId: 'usr_a10c',  handle: 'mika',       displayName: 'Mika',   online: true,  birthday: '08-24', pronouns: 'she/her',   statusText: '🏖 away till the 20th', statusKind: 'askme', place: 'Framework Hangout', bio: 'DnB, long instances, worse puns.', note: 'Met at Framework’s world. Likes drum & bass. Owes me a world tour.', peak: 'eve', weekendBias: 1.2 },
-    { source: 'vrcx',    sourceId: 'usr_b22f',  handle: 'juniper',    displayName: 'Juniper', online: true, birthday: null,    pronouns: 'they/them', statusText: '', statusKind: 'online', place: 'The Great Pug', bio: 'photographer. will point a camera at your avatar.', note: '', peak: 'eve', weekendBias: 1.0 },
+    { source: 'vrcx',    sourceId: 'usr_b22f',  handle: 'juniper',    displayName: 'Juniper', online: true, birthday: null,    pronouns: 'they/them', statusText: '', statusKind: 'online', place: 'The Copper Ferret', bio: 'photographer. will point a camera at your avatar.', note: '', peak: 'eve', weekendBias: 1.0 },
     { source: 'discord', sourceId: '198802',    handle: 'sable',      displayName: 'sable',  online: true,  birthday: null,    pronouns: 'she/her',   statusText: 'grinding shader homework', statusKind: 'busy', place: '', bio: 'shaders, coffee, regret.', note: 'Study-group buddy. Ping before finals week.', peak: 'night', weekendBias: 0.8 },
     { source: 'discord', sourceId: '204417',    handle: 'orion',      displayName: 'Orion',  online: false, birthday: '08-22', pronouns: 'he/him',    statusText: '', statusKind: 'offline', place: '', bio: '', note: '', peak: 'day', weekendBias: 0.9 },
     { source: 'twitter', sourceId: '77120041',  handle: 'wrenbuilds', displayName: 'Wren',   online: true,  birthday: null,    pronouns: 'she/her',   statusText: '', statusKind: 'online', place: '', bio: 'building small tools. mutuals only.', note: '', peak: 'day', weekendBias: 0.7 },
     { source: 'vrcx',    sourceId: 'usr_c31d',  handle: 'kestrel',    displayName: 'Kestrel', online: false, birthday: null,   pronouns: 'he/him',    statusText: 'sleeping 😴 back friday', statusKind: 'busy', place: '', bio: 'nocturnal. sorry.', note: '', peak: 'night', weekendBias: 1.1 },
     { source: 'discord', sourceId: '211903',    handle: 'amandine',   displayName: 'amandine', online: true, birthday: '09-02', pronouns: 'she/her',  statusText: '', statusKind: 'active', place: '', bio: 'ttrpg gremlin.', note: 'Runs the Tuesday campaign.', peak: 'eve', weekendBias: 1.0 },
-    { source: 'vrcx',    sourceId: 'usr_d47e',  handle: 'tycho',      displayName: 'Tycho',  online: true,  birthday: null,    pronouns: 'they/them', statusText: '', statusKind: 'joinme', place: 'Midnight Rooftop', bio: 'come vibe. mic optional.', note: '', peak: 'eve', weekendBias: 1.3 },
+    { source: 'vrcx',    sourceId: 'usr_d47e',  handle: 'tycho',      displayName: 'Tycho',  online: true,  birthday: null,    pronouns: 'they/them', statusText: '', statusKind: 'joinme', place: 'Starlit Terrace', bio: 'come vibe. mic optional.', note: '', peak: 'eve', weekendBias: 1.3 },
     { source: 'twitter', sourceId: '88431125',  handle: 'liormaps',   displayName: 'Lior',   online: false, birthday: null,    pronouns: 'he/him',    statusText: '', statusKind: 'offline', place: '', bio: 'cartography & trains.', note: '', peak: 'day', weekendBias: 0.6 },
     { source: 'discord', sourceId: '219660',    handle: 'novah',      displayName: 'Novah',  online: true,  birthday: null,    pronouns: 'she/they',  statusText: 'on holiday in Kyoto 🗼 slow replies', statusKind: 'askme', place: '', bio: 'away, eating everything.', note: 'Back end of the month.', peak: 'day', weekendBias: 1.0 },
     { source: 'vrcx',    sourceId: 'usr_e58a',  handle: 'fenn',       displayName: 'Fenn',   online: false, birthday: '08-21', pronouns: 'he/him',    statusText: '', statusKind: 'offline', place: '', bio: 'world-builder. always cooking.', note: 'Birthday tomorrow — say hi.', peak: 'eve', weekendBias: 1.1 },
