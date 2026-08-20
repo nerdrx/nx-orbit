@@ -7,7 +7,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import * as paths from './paths.js';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 // Reserved "operator" identity. Self-presence observations (for the overlap
 // heatmap's "me" axis) are keyed to this person. It is core-managed and seeded
@@ -82,6 +82,29 @@ const MIGRATIONS = [
         received_at INTEGER, n_persons INTEGER, n_obs INTEGER, rejected TEXT
       );
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+    `);
+  },
+
+  // v2 — a COVERING index for "the latest presence of every identity".
+  //
+  // No column, table or record-shape change: this is purely how one query is
+  // answered. That query — MAX(ts) per (source, source_id) over kind='presence',
+  // then the row at that ts — is the hottest read in the app. It backs the
+  // "who's around" grid, the People roster's live state and the status board's
+  // merged cards, and on a real database (~800 identities, ~65k presence rows)
+  // it was ~90ms every time, because `obs_kind_ts` gets it to the presence rows
+  // and then leaves it to sort them and to fetch status/place by rowid 65,000
+  // times.
+  //
+  // Ordering by (kind, source, source_id, ts) hands the grouping straight to the
+  // index, and carrying `status`/`place` in the index makes the whole query a
+  // covering scan with no table lookups at all: ~90ms → ~17ms measured on that
+  // shape, for about 13% more file. Cheap, because the alternative — the UI
+  // paying that scan three times per screen — is the thing the operator feels.
+  (d) => {
+    d.exec(`
+      CREATE INDEX IF NOT EXISTS obs_presence_latest
+        ON observation(kind, source, source_id, ts, status, place);
     `);
   },
 ];
@@ -351,6 +374,71 @@ export function cluster(id) {
     }
   }
   return [...seen];
+}
+
+// EVERY identity cluster, in ONE query. cluster(id) answers "who is this one
+// person?" with a BFS whose every hop is another SELECT — correct, and cheap for
+// one person, but O(identities) round trips when a derivation needs the
+// clustering of the WHOLE roster (whoIsOnNow, listPeople, statusBoard: ~800
+// identities on a real database, most of them unlinked). This reads
+// `person_link` once and builds the connected components in memory with
+// union-find + path compression, so the entire clustering costs a single scan of
+// a table that is normally a few dozen rows.
+//
+// → Map<personId, string[]>, holding an entry for every id that carries at least
+//   one link edge. The array is the whole cluster, sorted ascending, and is
+//   SHARED by reference between its members — so `members[0]` is a stable,
+//   deterministic key for the cluster whichever member you looked up, and the
+//   map costs one array per cluster rather than one per member.
+//   An id ABSENT from the map is its own single-identity cluster; callers read
+//   it as `index.get(id) ?? [id]`.
+//
+// Edges are symmetric and transitive (SPEC §2.1), exactly as cluster() treats
+// them, so both functions always agree — cluster() is the point lookup, this is
+// the bulk form.
+export function clusterIndex() {
+  const parent = new Map();
+  const add = (x) => {
+    if (!parent.has(x)) parent.set(x, x);
+  };
+  const find = (x) => {
+    let r = x;
+    while (parent.get(r) !== r) r = parent.get(r);
+    let c = x; // path compression: everyone on the walk points straight at the root
+    while (parent.get(c) !== r) {
+      const next = parent.get(c);
+      parent.set(c, r);
+      c = next;
+    }
+    return r;
+  };
+
+  for (const r of db.prepare('SELECT a_source, a_id, b_source, b_id FROM person_link').all()) {
+    const a = personId(r.a_source, r.a_id);
+    const b = personId(r.b_source, r.b_id);
+    add(a);
+    add(b);
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent.set(ra, rb);
+  }
+
+  const groups = new Map();
+  for (const id of parent.keys()) {
+    const root = find(id);
+    let g = groups.get(root);
+    if (!g) {
+      g = [];
+      groups.set(root, g);
+    }
+    g.push(id);
+  }
+  const out = new Map();
+  for (const g of groups.values()) {
+    g.sort();
+    for (const id of g) out.set(id, g);
+  }
+  return out;
 }
 
 export function getLinks(id) {

@@ -379,7 +379,20 @@ body.sky-parked .neb { animation-play-state: paused; }
   color: var(--muted);
   isolation: isolate;
 }
-.badge-src .sdot { width: 6px; height: 6px; border-radius: 50%; }
+.badge-src .sdot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; }
+
+/* --- merged cards: which platforms are they actually ON? ------------------
+   These two modifiers are applied ONLY when a card represents several linked
+   identities (SPEC §2.1), so an ordinary one-platform badge is untouched.
+   `is-live` is the one place a badge is allowed to borrow the cyan: it means
+   "on right now", the same thing --orbit-live means everywhere else in Orbit.
+   `is-off` is an absence, said quietly — the platform is still listed, because
+   knowing they are linked there is the point, it just isn't where they are. */
+.badge-src.is-live { color: var(--text); box-shadow: inset 0 0 0 1px rgba(0, 229, 255, 0.26); }
+.badge-src.is-live .sdot { box-shadow: 0 0 6px 1px rgba(0, 229, 255, 0.5); }
+.badge-src.is-off { opacity: 0.42; }
+.badge-src.is-off .sdot { filter: saturate(0.2) brightness(0.8); }
+
 .badge-src[data-src="vrcx"] .sdot { background: #9a3cff; }
 .badge-src[data-src="discord"] .sdot { background: #7b8cff; }
 .badge-src[data-src="twitter"] .sdot { background: #4ec8ff; }
@@ -593,8 +606,28 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.5; }
   padding-top: 12px;
 }
 .friend-card .fc-place { font-size: 12px; color: var(--muted); margin-top: 10px; display: flex; align-items: center; gap: 6px; min-width: 0; }
-.friend-card .fc-place svg { width: 13px; height: 13px; opacity: 0.7; }
+.friend-card .fc-place svg { width: 13px; height: 13px; opacity: 0.7; flex: 0 0 auto; }
 .friend-card .fc-place span { min-width: 0; }
+
+/* A linked human can be in two places at once — in a VRChat world AND in a
+   Steam game — so the card stacks them, one compact row per platform, instead
+   of picking one arbitrarily. The rows are the same 12px muted line as the
+   single-place case; only the pin is traded for the platform's name, because
+   with two of them "where" is not the question, "where on what" is. */
+.friend-card .fc-places { margin-top: 10px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.friend-card .fc-places .fc-place { margin-top: 0; }
+.friend-card .fc-place-src {
+  flex: 0 0 auto;
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--muted); opacity: 0.75;
+}
+.friend-card .fc-place-src::after { content: "·"; margin-left: 6px; opacity: 0.7; }
+.friend-card .fc-place-more { opacity: 0.7; font-size: 11px; }
+.friend-card.is-merged .fc-meta { gap: 5px; }
+
+/* The roster row's badge cluster — a fixed-size, non-shrinking tail so a merged
+   person's three badges can never squeeze the name out of its own row. */
+.person-row .pr-srcs { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; max-width: 40%; }
 
 /* empty state */
 .empty {
@@ -1095,8 +1128,14 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.5; }
   padding: 11px 13px; border-radius: var(--radius-sm); background: var(--well);
   font-size: 13.5px; line-height: 1.45;
 }
+/* The cake is an inline <svg> with no intrinsic size, so without this it
+   stretched to the flex line and filled half the sheet. */
 .pc-birthday { display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
+.pc-birthday svg { width: 16px; height: 16px; flex: 0 0 auto; opacity: 0.8; }
 .pc-birthday .amber { color: var(--amber); font-weight: 640; }
+/* "via Contacts" — says which linked identity a shared field came from, so a
+   value that isn't on the identity you opened never looks conjured up. */
+.pc-via { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); opacity: 0.75; }
 .pc-none { color: var(--muted); font-size: 13px; font-style: italic; }
 
 .timeline { display: flex; flex-direction: column; gap: 0; }

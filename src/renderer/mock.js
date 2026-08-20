@@ -238,11 +238,33 @@ if (!window.orbit) {
     // platforms" + Unlink path renders on first open without any setup.
     { source: 'vrcx',    sourceId: 'usr_noct91',     handle: 'noctis',   displayName: 'Noctis',    online: true,  birthday: null,    pronouns: 'she/her',   statusText: '', statusKind: 'askme', place: 'Prismatic Void', bio: 'aurora chaser.', note: 'Met at the winter meetup.', peak: 'night', weekendBias: 1.0 },
     { source: 'discord', sourceId: '778430noct',     handle: 'noctis9',  displayName: 'Noctis',    online: false, birthday: '12-14', pronouns: 'she/her',   statusText: '', statusKind: 'offline', place: '', bio: '', note: '', peak: 'eve', weekendBias: 1.0 },
+
+    // -- THE MERGED-CARD CASE (SPEC §2.1 / §5) --------------------------------
+    // One invented human the operator has linked across THREE platforms, in
+    // deliberately MIXED states, so the collapsed card renders its interesting
+    // shape in the standalone demo without any setup:
+    //   • steam — ONLINE, in a game
+    //   • vrcx  — ONLINE, in a world      → two places at once, both shown
+    //   • discord — OFFLINE               → the badge is listed but muted
+    // The birthday, pronouns and note live on the OFFLINE Discord identity while
+    // the freshest identity carries the name — which is exactly the case the
+    // display-field rule exists for (digest.js: prefer the most recently active
+    // identity, but never drop a field only that identity happens to have).
+    // Invented, like every name in this file.
+    { source: 'steam',   sourceId: '76561199marlow', handle: 'marlowgears', displayName: 'Marlow',    online: true,  birthday: null,    pronouns: '',       statusText: '', statusKind: 'online', place: 'Voidbreakers', bio: '', note: '', peak: 'eve', weekendBias: 1.0 },
+    { source: 'vrcx',    sourceId: 'usr_marlow3c',   handle: 'marlowVR',    displayName: 'Marlow 🜁', online: true,  birthday: null,    pronouns: '',       statusText: 'two screens, one brain', statusKind: 'joinme', place: 'The Velvet Moth', bio: 'builds tiny rooms.', note: '', peak: 'eve', weekendBias: 1.1 },
+    { source: 'discord', sourceId: '661204marlow',   handle: 'marlow',      displayName: 'marlow',    online: false, birthday: '11-07', pronouns: 'he/him', statusText: '', statusKind: 'offline', place: '', bio: '', note: 'Met at the summer meetup — ask about the moth world.', peak: 'eve', weekendBias: 1.0 },
   ];
 
   // Operator-asserted links present on first load (SPEC §2.1). Undirected pairs
-  // of person ids; the cluster is their transitive closure, recomputed on read.
-  const SEED_LINKS = [['vrcx:usr_noct91', 'discord:778430noct']];
+  // of person ids; the cluster is their transitive closure, recomputed on read —
+  // Marlow is seeded as steam↔vrcx and vrcx↔discord, so the third membership is
+  // TRANSITIVE, never a directly asserted edge.
+  const SEED_LINKS = [
+    ['vrcx:usr_noct91', 'discord:778430noct'],
+    ['steam:76561199marlow', 'vrcx:usr_marlow3c'],
+    ['vrcx:usr_marlow3c', 'discord:661204marlow'],
+  ];
 
   const ROSTER_SIZE = 411;   // what a real, well-used roster looks like
   const ONLINE_TARGET = 45;  // a normal Thursday evening
@@ -386,6 +408,64 @@ if (!window.orbit) {
       }
     }
     return [...seen].filter((cid) => byId.has(cid));
+  }
+
+  // Collapse one cluster into ONE entry per human — the same shape and the same
+  // rules as src/main/digest.js collapseCluster(), because the standalone demo
+  // has to render the merged card the real bridge produces, not a friendlier
+  // one. Result is a strict superset of a Person, plus:
+  //   identities[] — EVERY linked identity, each with its own status/place
+  //   online       — true if ANY identity is online
+  //   status/place/ts — the "primary", from the most recently-seen ONLINE one
+  // Display fields follow the one rule: rank identities by how recently they
+  // were active (online first, then lastSeen, then id), and take, per field, the
+  // first non-empty value. Never merged, never invented — one identity's value,
+  // verbatim (§0.3).
+  const isOnline = (p) => !!(p && p.status && p.status !== 'offline');
+  const CLUSTER_FIELDS = ['displayName', 'handle', 'avatarUrl', 'birthday', 'pronouns', 'bio', 'note', 'statusText'];
+  function collapseCluster(ids) {
+    const rows = ids.map((cid) => publicPerson(cid)).filter(Boolean);
+    if (!rows.length) return null;
+    const ranked = rows.slice().sort(
+      (a, b) =>
+        Number(isOnline(b)) - Number(isOnline(a)) ||
+        (b.lastSeen || 0) - (a.lastSeen || 0) ||
+        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    );
+    // Stable primary id: the lexicographically smallest member, so it cannot
+    // flip between refreshes and can key a DOM list.
+    const primary = rows.reduce((a, b) => (a.id <= b.id ? a : b));
+    const identities = rows
+      .map((p) => ({
+        id: p.id, source: p.source, sourceId: p.sourceId,
+        displayName: p.displayName, handle: p.handle, avatarUrl: p.avatarUrl,
+        status: p.status, place: p.place || null, ts: p.lastSeen, online: isOnline(p),
+      }))
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+    const entry = {
+      id: primary.id, source: primary.source, sourceId: primary.sourceId,
+      identities, links: [], isSelf: !!primary.isSelf,
+      lastSeen: rows.reduce((m, p) => Math.max(m, p.lastSeen || 0), 0),
+    };
+    for (const f of CLUSTER_FIELDS) {
+      const hit = ranked.find((p) => p[f] != null && String(p[f]).trim() !== '');
+      entry[f] = hit ? hit[f] : f === 'note' || f === 'statusText' ? '' : null;
+      // Which identity the card is NAMED after — where "open this person" lands,
+      // so the sheet header matches the card that was clicked.
+      if (f === 'displayName') entry.displayId = hit ? hit.id : entry.id;
+    }
+    const live = rows.filter(isOnline).sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0) || (a.id < b.id ? -1 : 1))[0];
+    entry.online = !!live;
+    entry.status = live ? live.status : 'offline';
+    entry.place = live ? live.place || '' : '';
+    entry.ts = live ? live.lastSeen : entry.lastSeen;
+    return entry;
+  }
+  // The cluster's canonical key — the smallest member id — so a human is emitted
+  // once however many of their identities we walked in through.
+  function clusterKey(id) {
+    return clusterOf(id).slice().sort()[0];
   }
 
   // Same normalizer/scorer the core uses (digest.js), so the standalone demo
@@ -629,8 +709,21 @@ if (!window.orbit) {
      --------------------------------------------------------------------- */
   const impl = {
     digest: {
+      // ONE entry per HUMAN, not per identity (SPEC §5): a friend linked across
+      // Steam + Discord + VRChat is one card carrying all three, and `count`
+      // counts people — linking someone must never inflate "who's around".
       whoIsOnNow() {
-        const people = PEOPLE.filter((p) => rawById.get(p.id)?.online).map((p) => publicPerson(p.id));
+        const seen = new Set();
+        const people = [];
+        for (const p of PEOPLE) {
+          if (!rawById.get(p.id)?.online) continue;
+          const key = clusterKey(p.id);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const e = collapseCluster(clusterOf(p.id));
+          if (e && e.online) people.push(e);
+        }
+        people.sort((a, b) => b.ts - a.ts);
         return clone({ count: people.length, people });
       },
       // Cell = the number of distinct calendar DATES on which you and that
@@ -676,15 +769,25 @@ if (!window.orbit) {
             .sort((a, b) => a.daysAway - b.daysAway || (a.person.id < b.person.id ? -1 : 1)),
         );
       },
+      // One row per HUMAN too — a linked friend sets one holiday note, and
+      // listing it twice would read as two friends being away.
       statusBoard() {
-        return clone(
-          PEOPLE.filter((p) => (byId.get(p.id)?.statusText || '').trim().length)
-            .map((p) => {
-              const raw = rawById.get(p.id);
-              return { person: publicPerson(p.id), status: raw.online ? raw.statusKind : 'offline', text: raw.statusText, ts: byId.get(p.id).lastSeen };
-            })
-            .sort((a, b) => b.ts - a.ts || (a.person.id < b.person.id ? -1 : 1)),
-        );
+        const rows = PEOPLE.filter((p) => (byId.get(p.id)?.statusText || '').trim().length)
+          .map((p) => {
+            const raw = rawById.get(p.id);
+            return { id: p.id, source: p.source, status: raw.online ? raw.statusKind : 'offline', text: raw.statusText, ts: byId.get(p.id).lastSeen };
+          })
+          .sort((a, b) => b.ts - a.ts || (a.id < b.id ? -1 : 1));
+        const seen = new Set();
+        const out = [];
+        for (const r of rows) {
+          const key = clusterKey(r.id);
+          if (seen.has(key)) continue; // newest-first, so the first row wins
+          seen.add(key);
+          const person = collapseCluster(clusterOf(r.id));
+          if (person) out.push({ person, source: r.source, status: r.status, text: r.text, ts: r.ts });
+        }
+        return clone(out);
       },
       changeFeed(sinceTs) {
         return clone(buildChangeFeed(sinceTs));
@@ -712,6 +815,29 @@ if (!window.orbit) {
             return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
           }),
         );
+      },
+      // The roster COLLAPSED to humans — what the People view renders. `list`
+      // above stays per-identity because the link picker links one identity to
+      // another and needs them apart. A human matches if ANY identity does, and
+      // the entry then carries the whole cluster.
+      listPeople(filter) {
+        const matched = impl.people.list(filter);
+        const seen = new Set();
+        const out = [];
+        for (const p of matched) {
+          const key = clusterKey(p.id);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const e = collapseCluster(clusterOf(p.id));
+          if (e) out.push(e);
+        }
+        out.sort((a, b) => {
+          const ka = sortKey(a.displayName);
+          const kb = sortKey(b.displayName);
+          if (ka !== kb) return ka < kb ? -1 : 1;
+          return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+        });
+        return clone(out);
       },
       get(id) {
         if (!byId.has(id)) return null;

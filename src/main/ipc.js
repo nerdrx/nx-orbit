@@ -15,6 +15,14 @@ export const CHANNELS = [
   'digest.statusBoard',
   'digest.changeFeed',
   'people.list',
+  // NOT in the SPEC §6 list as printed — added alongside people.list, which is
+  // unchanged. `people.list` returns one Person per IDENTITY (the link picker
+  // needs individual identities to link against); `people.listPeople` returns
+  // the same roster COLLAPSED to one entry per human (SPEC §2.1), each carrying
+  // identities[] and its live state, which is what the People roster and the
+  // heatmap's friend picker show. Record in SPEC §6 as:
+  //   orbit.people.listPeople(filter?) → PersonCluster[]  // one entry per HUMAN
+  'people.listPeople',
   'people.get',
   'people.setNote',
   'people.addManual',
@@ -47,6 +55,8 @@ export function register({ sources } = {}) {
   handle('digest.changeFeed', (sinceTs) => digest.changeFeed(sinceTs ?? 0));
 
   handle('people.list', (filter) => db.listPersons(filter ?? {}));
+  // The same roster, collapsed to one entry per human via the identity cluster.
+  handle('people.listPeople', (filter) => digest.listPeople(filter ?? {}));
   // people.get returns the whole identity cluster (§6): `identities` is every
   // Person reachable via links (incl. the queried id itself), so the card can
   // show "also on Steam / Discord"; `timeline` is unioned across that cluster.

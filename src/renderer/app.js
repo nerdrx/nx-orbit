@@ -155,6 +155,19 @@ function daysUntilBirthday(mmdd) {
 // should degrade to an empty view, never throw halfway through a render.
 const asArray = (v) => (Array.isArray(v) ? v : []);
 
+// The roster as PEOPLE, not identities (SPEC §2.1): one entry per human, each
+// carrying identities[]. The link picker deliberately keeps using
+// orbit.people.list — it links one identity to another, so it needs them apart.
+// A core that predates people.listPeople falls back to the identity list, which
+// renders correctly (as single-identity entries) and merely shows the duplicates
+// it always did, rather than an empty view.
+async function listHumans(filter) {
+  if (typeof orbit.people.listPeople === 'function') {
+    return asArray(await orbit.people.listPeople(filter));
+  }
+  return asArray(await orbit.people.list(filter));
+}
+
 /* ---------------------------------------------------------------- icons */
 // Stroked geometric glyphs, currentColor, ~1.7px stroke (DESIGN §8). No emoji.
 const I = {
@@ -183,9 +196,19 @@ const I = {
 const OBS_ICON = { presence: I.presence, status: I.status, location: I.location, bio: I.bio, nick: I.nick, avatar: I.avatarChange, friend: I.friend };
 
 /* ------------------------------------------------------- small builders */
-function srcBadge(source) {
-  const label = { vrcx: 'VRChat', discord: 'Discord', twitter: 'X', steam: 'Steam', contacts: 'Contacts', mastodon: 'Mastodon', matrix: 'Matrix', lastfm: 'Last.fm', manual: 'Manual' }[source] || source;
-  return `<span class="badge-src" data-src="${esc(source)}"><span class="sdot"></span>${esc(label)}</span>`;
+const SRC_NAMES = { vrcx: 'VRChat', discord: 'Discord', twitter: 'X', steam: 'Steam', contacts: 'Contacts', mastodon: 'Mastodon', matrix: 'Matrix', lastfm: 'Last.fm', manual: 'Manual' };
+const srcName = (s) => SRC_NAMES[s] || s || '—';
+
+// `state` is only ever passed for a MERGED card, where the same person carries
+// several platforms and the badges have to say which of them they are actually
+// on. Left null (every other call site, and every single-identity card) the
+// badge renders exactly as it always has — no visual regression for the common
+// case, which is most cards.
+function srcBadge(source, state = null) {
+  const label = srcName(source);
+  const cls = state === 'on' ? ' is-live' : state === 'off' ? ' is-off' : '';
+  const title = state === 'on' ? ` title="Online on ${esc(label)}"` : state === 'off' ? ` title="Not online on ${esc(label)}"` : '';
+  return `<span class="badge-src${cls}" data-src="${esc(source)}"${title}><span class="sdot"></span>${esc(label)}</span>`;
 }
 function sectionLabel(text) {
   return `<div class="section-label"><span class="micro">${esc(text)}</span><span class="rule"></span></div>`;
@@ -234,13 +257,115 @@ async function viewNow() {
     </div>`;
 }
 
+/* -------------------------------------------------- ONE CARD PER HUMAN
+   The core hands the Now grid and the People roster entries that are already
+   collapsed to a person (SPEC §2.1/§5): one entry per human, carrying
+   `identities[]` — every platform identity the OPERATOR linked, each with its
+   own status/place. So a friend you linked across Steam, Discord and VRChat is
+   one card showing three badges and which of them they are on right now, not
+   three cards saying the same thing three times.
+
+   `identitiesOf` is the compatibility floor: an entry without identities[] (an
+   older core, a stale mock) degrades to the single-identity shape, which is the
+   shape the renderer used to assume — so there is exactly ONE code path here and
+   a single-identity card comes out byte-identical to the one it replaced. */
+function identitiesOf(p) {
+  const ids = asArray(p?.identities);
+  if (ids.length) return ids;
+  return [{
+    id: p?.id, source: p?.source, sourceId: p?.sourceId,
+    displayName: p?.displayName, handle: p?.handle, avatarUrl: p?.avatarUrl,
+    status: p?.status ?? null, place: p?.place ?? null, ts: p?.ts ?? null,
+    online: !!(p?.status && p.status !== 'offline'),
+  }];
+}
+
+// Online identities first (that is the answer to "where are they now"), then a
+// stable id order so the badge row never reshuffles between refreshes.
+function orderIdentities(ids) {
+  return ids.slice().sort(
+    (a, b) =>
+      Number(!!b.online) - Number(!!a.online) ||
+      ((b.ts ?? 0) - (a.ts ?? 0)) ||
+      (String(a.id) < String(b.id) ? -1 : 1),
+  );
+}
+
+// Every linked platform, with the ones they are on right now at full strength
+// and the rest muted. The on/off treatment applies only when it says something:
+// several identities AND at least one of them online. A single-identity badge
+// keeps the plain form it always had, and so does a merged human who is on
+// none of their platforms — dimming every badge of someone who is simply
+// offline would be shouting an absence at you twice.
+function platformBadges(ids) {
+  const decorate = ids.length > 1 && ids.some((i) => i.online);
+  return orderIdentities(ids)
+    .map((i) => srcBadge(i.source, decorate ? (i.online ? 'on' : 'off') : null))
+    .join('');
+}
+
+// Where "open this person" goes. `id` is the entry's stable key; `displayId` is
+// the identity whose name the card is showing — landing there makes the sheet
+// header match the card that was clicked. Any member id opens the same human's
+// cluster either way (people.get accepts all of them), so this is purely about
+// which face the sheet leads with.
+const openIdOf = (p) => p?.displayId || p?.id;
+
+// WHERE they are — plural on purpose. Two identities online at once in two
+// different places (a VRChat world AND a Steam game) is a real, common state for
+// someone you have linked, and picking one of them arbitrarily throws away the
+// half the operator was more likely to want. So both are shown, each named with
+// the platform it came from, and the list is capped so no cluster can grow the
+// card unboundedly. Identical places (same world on two identities) collapse to
+// one row — that is de-duplication, not a choice between them.
+const MAX_PLACES = 3;
+function placeRows(ids) {
+  const seen = new Set();
+  const rows = [];
+  for (const i of orderIdentities(ids)) {
+    if (!i.online) continue;
+    const place = String(i.place ?? '').trim();
+    if (!place || seen.has(place)) continue;
+    seen.add(place);
+    rows.push(i);
+  }
+  if (!rows.length) return '';
+  const multi = ids.length > 1;
+  // The single-identity case is the old markup, unchanged: pin icon, one line.
+  if (!multi) {
+    return `<div class="fc-place">${I.place}<span class="t-clip">${esc(rows[0].place)}</span></div>`;
+  }
+  const shown = rows.slice(0, MAX_PLACES);
+  const more = rows.length - shown.length;
+  return `<div class="fc-places">${shown
+    .map(
+      (i) =>
+        `<div class="fc-place"><span class="fc-place-src">${esc(srcName(i.source))}</span><span class="t-clip" title="${esc(fullName(i.place))}">${esc(safeName(i.place, 48))}</span></div>`,
+    )
+    .join('')}${more ? `<div class="fc-place fc-place-more">+${more} more</div>` : ''}</div>`;
+}
+
+// "online on VRChat and Steam" — the badge row said visually; screen readers and
+// the card's accessible name need it in words.
+function onlineOnPhrase(ids) {
+  const on = orderIdentities(ids).filter((i) => i.online).map((i) => srcName(i.source));
+  if (!on.length) return '';
+  if (on.length === 1) return on[0];
+  return `${on.slice(0, -1).join(', ')} and ${on[on.length - 1]}`;
+}
+
 function friendCard(p) {
   const n = nameCell(p.displayName);
-  const place = p.place
-    ? `<div class="fc-place">${I.place}<span class="t-clip">${esc(p.place)}</span></div>`
-    : '';
+  const ids = identitiesOf(p);
+  const multi = ids.length > 1;
+  const where = placeRows(ids);
+  const onPhrase = onlineOnPhrase(ids);
+  const chip = multi
+    ? `<span class="chip live" title="Online on ${esc(onPhrase)}"><span class="cdot"></span>Online</span>`
+    : '<span class="chip live"><span class="cdot"></span>Online</span>';
+  const label = onPhrase ? `Open ${n.full} — online on ${onPhrase}` : `Open ${n.full}`;
   return `
-    <button class="card interactive friend-card" data-open="${esc(p.id)}" aria-label="Open ${esc(n.full)}">
+    <button class="card interactive friend-card${multi ? ' is-merged' : ''}" data-open="${esc(openIdOf(p))}" aria-label="${esc(label)}">
       <div class="fc-top">
         ${avatar(p, 'md')}
         <div class="fc-name">
@@ -248,10 +373,10 @@ function friendCard(p) {
           <span class="fc-handle t-clip">@${esc(p.handle)}</span>
         </div>
       </div>
-      ${place}
+      ${where}
       <div class="fc-meta">
-        <span class="chip live"><span class="cdot"></span>Online</span>
-        ${srcBadge(p.source)}
+        ${chip}
+        ${platformBadges(ids)}
       </div>
     </button>`;
 }
@@ -287,8 +412,11 @@ let heatmapRoster = [];
 let refocusHmSelect = false;
 
 async function viewHeatmap() {
+  // The picker lists HUMANS, not identities: overlapHeatmap() already unions a
+  // linked friend's whole cluster, so offering their Steam and their VRChat as
+  // two entries would offer the same grid twice under two names.
   const [people, hm] = await Promise.all([
-    orbit.people.list({}),
+    listHumans({}),
     orbit.digest.heatmap(heatmapPerson || undefined),
   ]);
   const roster = asArray(people);
@@ -608,7 +736,7 @@ function heatLegend(max, { isAggregate = true, who = 'your circle', friendsConsi
    ===================================================================== */
 let peopleFilter = '';
 async function viewPeople() {
-  const list = asArray(await orbit.people.list(peopleFilter ? { q: peopleFilter } : {}));
+  const list = await listHumans(peopleFilter ? { q: peopleFilter } : {});
   // view-fill: the header and search box hold still and the 411-row list gets
   // its own scroller, instead of the whole view scrolling away under the caret.
   return `
@@ -633,17 +761,24 @@ function peopleListHtml(list) {
     : emptyState('No matches', 'Nobody matches that. Clear the search, or add someone by hand from the Add view.');
 }
 
+// One row per HUMAN, same rule as the Now card: all their linked platforms, the
+// online ones lit. A linked friend used to appear here three times.
 function personRow(p) {
   const n = nameCell(p.displayName);
+  const ids = identitiesOf(p);
   const note = p.note ? `<span class="pr-note t-clip" title="${esc(p.note)}">${esc(p.note)}</span>` : '';
-  const liveChip = p.status && p.status !== 'offline' ? '<span class="chip live"><span class="cdot"></span>On</span>' : '';
+  const onPhrase = onlineOnPhrase(ids);
+  const liveChip = onPhrase
+    ? `<span class="chip live" title="Online on ${esc(onPhrase)}"><span class="cdot"></span>On</span>`
+    : '';
+  const label = onPhrase ? `Open ${n.full} — online on ${onPhrase}` : `Open ${n.full}`;
   return `
-    <button class="person-row" data-open="${esc(p.id)}" aria-label="Open ${esc(n.full)}">
+    <button class="person-row" data-open="${esc(openIdOf(p))}" aria-label="${esc(label)}">
       ${avatar(p, 'sm')}
       <span class="pr-name"><b class="t-clip"${n.title}>${n.html}</b><small class="t-clip">@${esc(p.handle)}</small></span>
       ${note}
       ${liveChip}
-      ${srcBadge(p.source)}
+      <span class="pr-srcs">${platformBadges(ids)}</span>
     </button>`;
 }
 
@@ -1445,17 +1580,37 @@ function identitiesSection(p, identities) {
     </div>`;
 }
 
+// SPEC §2.1: what a person PUBLISHED belongs to the human, not to whichever of
+// their identities you happened to open. A Contacts row typically carries the
+// birthday while the Steam row carries the avatar, so a sheet opened on Steam
+// must not claim "no birthday shared" for someone who plainly shared one — the
+// merged card next door is already showing it. Same rule as the card: prefer
+// this identity's value, else the most recently-seen linked identity that has
+// one, and name that platform so nothing on screen looks invented.
+const hasValue = (v) => v != null && String(v).trim() !== '';
+function clusterField(p, identities, key) {
+  if (hasValue(p[key])) return { value: p[key], from: null };
+  const hit = asArray(identities)
+    .filter((x) => x.id !== p.id && hasValue(x[key]))
+    .sort((a, b) => (b.lastSeen ?? 0) - (a.lastSeen ?? 0) || (String(a.id) < String(b.id) ? -1 : 1))[0];
+  return hit ? { value: hit[key], from: hit.source } : { value: null, from: null };
+}
+const viaBadge = (from) => (from ? ` <span class="pc-via">via ${esc(srcName(from))}</span>` : '');
+
 async function personSheet(p, identities, timeline) {
   const h = hueOf(p.id || p.displayName || 'x');
   const multiSource = asArray(identities).length > 1;
+  const bday = clusterField(p, identities, 'birthday');
+  const pronouns = clusterField(p, identities, 'pronouns');
+  const bio = clusterField(p, identities, 'bio');
 
-  // The birthday label is local arithmetic on p.birthday — no second query.
+  // The birthday label is local arithmetic on the value — no second query.
   let bdayHtml = `<p class="pc-none">No birthday shared. VRChat and X don’t expose this — add it from the Add view if a friend tells you.</p>`;
-  if (p.birthday) {
-    const away = daysUntilBirthday(p.birthday);
+  if (bday.value) {
+    const away = daysUntilBirthday(bday.value);
     const label = away === null ? '' : away === 0 ? 'today' : away === 1 ? 'tomorrow' : `in ${away} days`;
     const soon = away !== null && away <= 7;
-    bdayHtml = `<div class="pc-birthday">${I.cake}<span>${esc(p.birthday)}${label ? ` · <span class="${soon ? 'amber' : ''}">${esc(label)}</span>` : ''}</span></div>`;
+    bdayHtml = `<div class="pc-birthday">${I.cake}<span>${esc(bday.value)}${label ? ` · <span class="${soon ? 'amber' : ''}">${esc(label)}</span>` : ''}${viaBadge(bday.from)}</span></div>`;
   }
 
   const status = p.statusText
@@ -1472,7 +1627,7 @@ async function personSheet(p, identities, timeline) {
         <span class="avatar lg" style="--h:${h}" aria-hidden="true">${esc(initials(p.displayName))}${p.status && p.status !== 'offline' ? '<span class="live"></span>' : ''}</span>
         <div class="pc-idblock">
           <h2>${esc(fullName(p.displayName))}</h2>
-          <div class="pc-handle">@${esc(p.handle)}${p.pronouns ? ` · ${esc(p.pronouns)}` : ''}</div>
+          <div class="pc-handle">@${esc(p.handle)}${pronouns.value ? ` · ${esc(pronouns.value)}` : ''}</div>
           <div class="pc-idrow">${srcBadge(p.source)}${p.status && p.status !== 'offline' ? '<span class="chip live"><span class="cdot"></span>Online now</span>' : `<span class="chip off">${p.lastSeen ? `Seen ${esc(relTime(p.lastSeen))}` : 'Offline'}</span>`}</div>
         </div>
       </div>
@@ -1480,7 +1635,7 @@ async function personSheet(p, identities, timeline) {
         ${identitiesSection(p, asArray(identities))}
         <div class="pc-section"><span class="micro">Status</span>${status}</div>
         <div class="pc-section"><span class="micro">Birthday</span>${bdayHtml}</div>
-        ${p.bio ? `<div class="pc-section"><span class="micro">Their bio</span><div class="pc-status">${esc(p.bio)}</div></div>` : ''}
+        ${bio.value ? `<div class="pc-section"><span class="micro">Their bio${bio.from ? ` <span class="hint" style="text-transform:none;letter-spacing:0">· from ${esc(srcName(bio.from))}</span>` : ''}</span><div class="pc-status">${esc(bio.value)}</div></div>` : ''}
 
         <div class="pc-section">
           <span class="micro">Your note <span class="hint" style="text-transform:none;letter-spacing:0">· private, never inferred</span></span>
@@ -1817,7 +1972,7 @@ function wireView() {
         const token = ++searchToken;
         let list;
         try {
-          list = asArray(await orbit.people.list(peopleFilter ? { q: peopleFilter } : {}));
+          list = await listHumans(peopleFilter ? { q: peopleFilter } : {});
         } catch (err) {
           toast(`Search failed — ${err?.message || 'the core did not answer.'}`, 'danger');
           return;

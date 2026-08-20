@@ -15,8 +15,32 @@ function person(source, sourceId) {
   );
 }
 
-// --- whoIsOnNow() — latest presence per person; those currently online -------
-export function whoIsOnNow() {
+// ===========================================================================
+// IDENTITY CLUSTERS — one entry per HUMAN (SPEC §2.1 / §5)
+// ===========================================================================
+//
+// A link is the operator's own assertion that two platform identities are one
+// person, and it is symmetric and transitive, so the closure over `person_link`
+// is one human. Every "who is around / who is in my roster" derivation therefore
+// has to COLLAPSE identities into humans before it shapes anything: a friend you
+// linked across Steam, Discord and VRChat is one card, not three, and the count
+// beside it counts people, not rows — otherwise linking someone would inflate
+// "who's around", which is a lie about how many friends are actually there.
+//
+// The clustering itself is never a guess (§0.3): it is exactly the edges the
+// operator clicked, and nothing else.
+//
+// PERFORMANCE. All three call sites need the clustering of the WHOLE roster, and
+// db.cluster() is a BFS of queries — fine per person, ~800 round trips here. So
+// every one of them takes db.clusterIndex() ONCE (a single scan of person_link,
+// connected components built in memory with union-find) and reuses it, plus one
+// grouped presence scan, plus one primary-key lookup per person actually shown.
+
+// Latest `presence` per IDENTITY for the whole database, in one grouped query —
+// → Map<personId, { status, place, ts, online }>. The reserved `self` person is
+// excluded here rather than at every call site: it is the operator's own
+// presence anchor, never a friend (§2.1).
+function latestPresenceByIdentity() {
   const rows = db.getDb().prepare(
     `SELECT o.source, o.source_id, o.status, o.place, o.ts
        FROM observation o
@@ -33,21 +57,197 @@ export function whoIsOnNow() {
         AND o.source != ?`
   ).all(db.SELF.source);
 
-  // Collapse ties on ts (pick the online-most) and keep only online people.
-  const seen = new Map();
+  const out = new Map();
   for (const r of rows) {
-    const key = r.source + ' ' + r.source_id;
-    const prev = seen.get(key);
-    if (!prev || (ONLINE.has(r.status) && !ONLINE.has(prev.status))) seen.set(key, r);
+    const id = db.personId(r.source, r.source_id);
+    const prev = out.get(id);
+    // Two rows can share the identity's MAX(ts) — an online and an offline event
+    // recorded in the same millisecond. Picking the online one is the only
+    // non-arbitrary tie-break: they are demonstrably there.
+    if (!prev || (ONLINE.has(r.status) && !prev.online)) {
+      out.set(id, { status: r.status, place: r.place, ts: r.ts, online: ONLINE.has(r.status) });
+    }
   }
+  return out;
+}
+
+// THE DISPLAY-FIELD RULE — one rule, every field.
+//
+// Rank a cluster's identities by how recently the operator actually saw them:
+// online ones first, then latest presence `ts`, then `last_seen`, then id (so
+// the order is total and cannot flip between refreshes). Then take, PER FIELD,
+// the first identity in that order whose value is non-empty.
+//
+// That single rule covers both halves of what a merged card needs:
+//   • displayName / handle / avatarUrl come from the identity you most recently
+//     saw them on — the name and face you would actually recognise today;
+//   • birthday / pronouns / bio / note survive even when the freshest identity
+//     carries none. A `contacts` identity typically holds the birthday while the
+//     `steam` one holds the avatar; preferring "whoever has one" is what keeps
+//     either from being dropped.
+//
+// Nothing is merged, blended, concatenated or synthesised: every field on the
+// card is ONE identity's value, verbatim. Inventing a composite would be
+// inference about a person (§0.3).
+const DISPLAY_FIELDS = ['displayName', 'handle', 'avatarUrl', 'birthday', 'pronouns', 'bio', 'note'];
+
+function nonEmpty(v) {
+  return v != null && String(v).trim() !== '';
+}
+
+// Collapse one cluster's Person rows into a single entry. The result is a strict
+// SUPERSET of a Person (same id/source/handle/… keys), so every existing caller
+// and every renderer path that expected a Person keeps working; what is new is
+// `identities[]` (all of them, each with its own live state) and the primary
+// presence lifted from the most recently-seen ONLINE identity.
+function collapseCluster(persons, presence) {
+  const rows = persons.map((p) => ({ p, pr: presence.get(p.id) || null }));
+
+  // "Most recently active" — see THE DISPLAY-FIELD RULE above.
+  const activity = (x) => x.pr?.ts ?? x.p.lastSeen ?? 0;
+  const ranked = rows.slice().sort(
+    (a, b) =>
+      Number(!!b.pr?.online) - Number(!!a.pr?.online) ||
+      activity(b) - activity(a) ||
+      (a.p.id < b.p.id ? -1 : a.p.id > b.p.id ? 1 : 0)
+  );
+
+  // A stable primary id for the cluster: the lexicographically smallest member.
+  // It never flips between refreshes (so it can key a DOM list), it is a real
+  // member id (so people.get / the person sheet accept it), and it does not
+  // depend on who happens to be online at this second.
+  const primary = rows.reduce((a, b) => (a.p.id <= b.p.id ? a : b));
+
+  const identities = rows.map(({ p, pr }) => ({
+    id: p.id,
+    source: p.source,
+    sourceId: p.sourceId,
+    displayName: p.displayName,
+    handle: p.handle,
+    avatarUrl: p.avatarUrl,
+    status: pr ? pr.status : null,
+    place: pr ? pr.place : null,
+    ts: pr ? pr.ts : null,
+    online: !!pr?.online,
+  }));
+  identities.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+  const entry = {
+    id: primary.p.id,
+    source: primary.p.source,
+    sourceId: primary.p.sourceId,
+    firstSeen: rows.reduce((m, r) => Math.min(m, r.p.firstSeen ?? Infinity), Infinity),
+    lastSeen: rows.reduce((m, r) => Math.max(m, r.p.lastSeen ?? 0), 0),
+    identities,
+  };
+  if (!Number.isFinite(entry.firstSeen)) entry.firstSeen = entry.lastSeen;
+  for (const f of DISPLAY_FIELDS) {
+    const hit = ranked.find((r) => nonEmpty(r.p[f]));
+    entry[f] = hit ? hit.p[f] : null;
+    // WHICH identity the card is NAMED after. `id` is the stable key (smallest
+    // member, never moves); `displayId` is the one whose name and face the card
+    // is showing, which is where "open this person" should land — clicking a
+    // card that reads "Marlow 🜁" and getting a sheet headed "marlow" looks like
+    // the wrong person opened, even though both are the same human.
+    if (f === 'displayName') entry.displayId = hit ? hit.p.id : entry.id;
+  }
+
+  // The PRIMARY presence: the most recently-seen identity that is online right
+  // now. A human is online if ANY identity is (§5) — the card shows all of them,
+  // this is just the one the compact views quote.
+  const live = rows
+    .filter((r) => r.pr?.online)
+    .sort((a, b) => b.pr.ts - a.pr.ts || (a.p.id < b.p.id ? -1 : 1))[0];
+  entry.online = !!live;
+  entry.status = live ? live.pr.status : null;
+  entry.place = live ? live.pr.place : null;
+  entry.ts = live ? live.pr.ts : entry.lastSeen;
+  return entry;
+}
+
+// Walk clusters without re-querying a person twice. `seed` supplies rows we
+// already have in hand (e.g. the filtered roster), so only the cluster members
+// that weren't in the seed cost a primary-key lookup.
+function clusterWalker(seed = []) {
+  const index = db.clusterIndex();
+  const cache = new Map(seed.map((p) => [p.id, p]));
+  const done = new Set();
+  return {
+    // → the cluster's Person rows (self excluded), or null if it was already
+    // emitted or holds no surviving person.
+    take(id) {
+      const members = index.get(id) ?? [id];
+      const key = members[0]; // the shared, sorted array → one key per cluster
+      if (done.has(key)) return null;
+      done.add(key);
+      const persons = [];
+      for (const mid of members) {
+        if (db.parsePersonId(mid).source === db.SELF.source) continue; // never the operator
+        let p = cache.get(mid);
+        if (p === undefined) {
+          p = db.getPerson(mid);
+          cache.set(mid, p);
+        }
+        if (p) persons.push(p);
+      }
+      return persons.length ? persons : null;
+    },
+  };
+}
+
+// --- whoIsOnNow() — one entry per HUMAN who is online on ANY identity --------
+//
+// SPEC §5. Latest presence per identity, then collapsed to the identity cluster:
+// `identities[]` carries every linked platform with its own status/place/ts, so
+// the card can show all the badges and which of them they are on right now; the
+// human is online if ANY identity is; and `count` counts humans, not identities.
+export function whoIsOnNow() {
+  const presence = latestPresenceByIdentity();
+  const walker = clusterWalker();
   const people = [];
-  for (const r of seen.values()) {
-    if (!ONLINE.has(r.status)) continue;
-    const p = person(r.source, r.source_id);
-    if (p) people.push({ ...p, status: r.status, place: r.place, ts: r.ts });
+  for (const [id, pr] of presence) {
+    if (!pr.online) continue;
+    const persons = walker.take(id);
+    if (!persons) continue;
+    const entry = collapseCluster(persons, presence);
+    if (!entry.online) continue; // a cluster whose only online row was deleted
+    people.push(entry);
   }
   people.sort((a, b) => b.ts - a.ts);
   return { count: people.length, people };
+}
+
+// --- listPeople(filter) — the roster, collapsed to humans -------------------
+//
+// The cluster-collapsed view of db.listPersons(): one entry per human, same
+// shape as whoIsOnNow()'s entries (a Person superset carrying `identities[]` and
+// the live state), so the roster and the "who's around" grid share exactly one
+// renderer.
+//
+// A human MATCHES if any of their identities does, and the entry then carries
+// the WHOLE cluster — searching "badger" and getting a card that also shows
+// their Steam identity is the point of having linked them. db.listPersons stays
+// exactly as it was: the link picker needs individual identities to link
+// against, and people.get(id) must keep working with any member id.
+export function listPeople(filter = {}) {
+  const matched = db.listPersons(filter);
+  const presence = latestPresenceByIdentity();
+  const walker = clusterWalker(matched);
+  const out = [];
+  for (const p of matched) {
+    const persons = walker.take(p.id);
+    if (!persons) continue;
+    out.push(collapseCluster(persons, presence));
+  }
+  // Locale-independent ordering (the host may run any locale), total on id.
+  const key = (e) => String(e.displayName ?? e.handle ?? e.sourceId ?? '').toLowerCase();
+  out.sort((a, b) => {
+    const ka = key(a);
+    const kb = key(b);
+    if (ka !== kb) return ka < kb ? -1 : 1;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+  return out;
 }
 
 // --- overlapHeatmap(personId?) — 7×24 histogram of past overlap -------------
@@ -322,7 +522,15 @@ function parseBirthday(b) {
   return { month, day };
 }
 
-// --- statusBoard() — latest non-empty status text per friend, newest first --
+// --- statusBoard() — latest non-empty status text per HUMAN, newest first ---
+//
+// Cluster-collapsed the same way as whoIsOnNow (§2.1): a friend you have linked
+// across Discord and VRChat sets one holiday note, and listing it twice would
+// read as two friends being away. The query already returns newest-first, so the
+// FIRST row a cluster produces is that human's latest status — every later one
+// is the same person's older note on another platform and is skipped. `person`
+// is the collapsed entry (a Person superset), so the row still exposes
+// person.id / person.displayName exactly as before, and now also identities[].
 export function statusBoard() {
   const rows = db.getDb().prepare(
     `SELECT o.source, o.source_id, o.status, o.text, o.ts
@@ -341,14 +549,21 @@ export function statusBoard() {
       ORDER BY o.ts DESC`
   ).all(db.SELF.source);
 
-  const seen = new Set();
+  const presence = latestPresenceByIdentity();
+  const walker = clusterWalker();
   const out = [];
   for (const r of rows) {
-    const key = r.source + ' ' + r.source_id;
-    if (seen.has(key)) continue; // guard ties on ts
-    seen.add(key);
-    const p = person(r.source, r.source_id);
-    if (p) out.push({ person: p, status: r.status, text: r.text, ts: r.ts });
+    const persons = walker.take(db.personId(r.source, r.source_id));
+    if (!persons) continue; // already emitted for this human, or nobody left
+    out.push({
+      person: collapseCluster(persons, presence),
+      // Which identity wrote it — the same text can only mean one thing, but on
+      // a merged card it helps to say where they said it.
+      source: r.source,
+      status: r.status,
+      text: r.text,
+      ts: r.ts,
+    });
   }
   return out;
 }

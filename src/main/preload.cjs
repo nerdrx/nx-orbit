@@ -22,7 +22,12 @@ const orbit = {
     changeFeed: (sinceTs) => call('digest.changeFeed', sinceTs),
   },
   people: {
+    // list  = one Person per IDENTITY (what the link picker links against).
+    // listPeople = the same roster collapsed to one entry per HUMAN via the
+    // identity cluster (§2.1) — each entry carries identities[] with per-platform
+    // status, so a friend linked across three platforms is one card, not three.
     list: (filter) => call('people.list', filter),
+    listPeople: (filter) => call('people.listPeople', filter),
     get: (id) => call('people.get', id),
     setNote: (id, text) => call('people.setNote', id, text),
     addManual: (person) => call('people.addManual', person),

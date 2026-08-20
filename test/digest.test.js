@@ -531,3 +531,206 @@ test('linkSuggestions: roster-wide de-dups and is cross-source only', () => {
   assert.equal(s.length, 1); // (a,b) once, never also (b,a)
   assert.notEqual(s[0].person.source, s[0].candidate.source);
 });
+
+// =============================================================================
+// IDENTITY CLUSTERS — one card per HUMAN (SPEC §2.1, §5)
+//
+// Links are the operator's own assertion, symmetric and transitive, so the
+// closure over person_link is one person. Every "who is around / who is in my
+// roster" derivation collapses to that: a friend linked across Steam, Discord
+// and VRChat is ONE entry carrying identities[], not three entries — and the
+// count beside them counts humans, because linking someone must never inflate
+// how many friends are actually there.
+// =============================================================================
+
+// A person on an arbitrary source (seedFriend is vrcx-only), with control over
+// last_seen so the display-field ranking is deterministic rather than clock-y.
+function seedOn(source, sourceId, over = {}, lastSeen = 1000) {
+  db.upsertPerson({ source, sourceId, displayName: `${source}-${sourceId}`, ...over }, lastSeen);
+}
+function presenceOn(source, sourceId, status, ts, place = null) {
+  db.insertObservation({ source, sourceId, kind: 'presence', status, ts, place });
+}
+const idsOf = (entry) => entry.identities.map((i) => i.id).sort();
+
+test('whoIsOnNow: a linked trio is ONE entry with three identities, online if ANY is', () => {
+  seedOn('steam', 'm', { handle: 'marlow' });
+  seedOn('vrcx', 'm', { handle: 'marlowVR' });
+  seedOn('discord', 'm', { handle: 'marlow' });
+  db.linkPersons('steam:m', 'vrcx:m');
+  db.linkPersons('vrcx:m', 'discord:m'); // transitive — steam and discord share no edge
+
+  presenceOn('steam', 'm', 'offline', 500);
+  presenceOn('vrcx', 'm', 'online', 900, 'The Velvet Moth');
+  presenceOn('discord', 'm', 'offline', 700);
+
+  const r = digest.whoIsOnNow();
+  assert.equal(r.count, 1, 'one human, not three identities');
+  assert.equal(r.people.length, 1);
+
+  const e = r.people[0];
+  assert.equal(e.online, true, 'online because ONE identity is');
+  assert.deepEqual(idsOf(e), ['discord:m', 'steam:m', 'vrcx:m'], 'all three linked platforms');
+  // the primary is the most recently-seen ONLINE identity
+  assert.equal(e.status, 'online');
+  assert.equal(e.place, 'The Velvet Moth');
+  assert.equal(e.ts, 900);
+  // each identity carries its OWN state, so the card can badge them apart
+  const byId = new Map(e.identities.map((i) => [i.id, i]));
+  assert.equal(byId.get('vrcx:m').online, true);
+  assert.equal(byId.get('steam:m').online, false);
+  assert.equal(byId.get('discord:m').online, false);
+  // the primary id is a real member id and is stable (lexicographically first)
+  assert.equal(e.id, 'discord:m');
+  assert.ok(db.getPerson(e.id), 'the primary id opens the person sheet');
+});
+
+test('whoIsOnNow: two identities online at once keep BOTH places on the entry', () => {
+  seedOn('steam', 'm');
+  seedOn('vrcx', 'm');
+  db.linkPersons('steam:m', 'vrcx:m');
+  presenceOn('steam', 'm', 'online', 800, 'Voidbreakers');
+  presenceOn('vrcx', 'm', 'joinme', 900, 'The Velvet Moth');
+
+  const e = digest.whoIsOnNow().people[0];
+  const places = e.identities.filter((i) => i.online).map((i) => i.place).sort();
+  assert.deepEqual(places, ['The Velvet Moth', 'Voidbreakers'], 'neither place is dropped');
+  assert.equal(e.place, 'The Velvet Moth', 'the primary is the most recent online one');
+  assert.equal(e.status, 'joinme');
+});
+
+test('whoIsOnNow: count counts HUMANS — linking two online identities drops it by one', () => {
+  seedOn('steam', 'a');
+  seedOn('discord', 'b');
+  presenceOn('steam', 'a', 'online', 900);
+  presenceOn('discord', 'b', 'online', 900);
+
+  assert.equal(digest.whoIsOnNow().count, 2, 'two unlinked identities = two people');
+  db.linkPersons('steam:a', 'discord:b');
+  const after = digest.whoIsOnNow();
+  assert.equal(after.count, 1, 'the same two, asserted as one human, are one');
+  assert.equal(after.people.length, 1);
+  assert.equal(after.people[0].identities.length, 2);
+});
+
+test('whoIsOnNow: unlinked people are untouched single-identity entries', () => {
+  seedOn('vrcx', 'solo', { handle: 'solo', displayName: 'Solo' });
+  presenceOn('vrcx', 'solo', 'online', 900, 'Quiet Library');
+
+  const e = digest.whoIsOnNow().people[0];
+  assert.equal(e.identities.length, 1);
+  assert.equal(e.id, 'vrcx:solo');
+  assert.equal(e.displayName, 'Solo');
+  assert.equal(e.place, 'Quiet Library');
+  assert.equal(e.online, true);
+  assert.equal(e.identities[0].online, true);
+});
+
+test('whoIsOnNow: a cluster whose every identity is offline is excluded', () => {
+  seedOn('steam', 'z');
+  seedOn('discord', 'z');
+  db.linkPersons('steam:z', 'discord:z');
+  presenceOn('steam', 'z', 'online', 100);
+  presenceOn('steam', 'z', 'offline', 200);
+  presenceOn('discord', 'z', 'offline', 300);
+
+  assert.deepEqual(digest.whoIsOnNow(), { count: 0, people: [] });
+});
+
+test('whoIsOnNow: the reserved self person never appears, in any identity list', () => {
+  seedOn('vrcx', 'a');
+  presenceOn('vrcx', 'a', 'online', 900);
+  selfPresence(1000); // the operator is online too
+
+  const r = digest.whoIsOnNow();
+  assert.equal(r.count, 1);
+  assert.ok(!r.people.some((p) => p.source === 'self'));
+  assert.ok(!r.people.some((p) => p.identities.some((i) => i.source === 'self')));
+  // and it is unlinkable, so it can never be dragged into a cluster
+  assert.throws(() => db.linkPersons('vrcx:a', 'self:me'), /self person cannot be linked/);
+});
+
+test('whoIsOnNow: display fields prefer the most recently active identity that HAS one', () => {
+  // vrcx is the only ONLINE identity → it ranks first and names the human.
+  seedOn('vrcx', 'b', { handle: 'badgerVR', displayName: 'Badger VR' }, 500);
+  // contacts is the freshest OFFLINE identity → it supplies what vrcx lacks.
+  seedOn('contacts', 'b', { handle: 'badger', displayName: 'Badger', birthday: '03-04', pronouns: 'they/them', note: 'met at the meetup' }, 2000);
+  // steam is older still, but it is the only identity with an avatar.
+  seedOn('steam', 'b', { handle: 'badgr', displayName: 'badgr', avatarUrl: 'https://cdn.example/av.png' }, 1000);
+  db.linkPersons('vrcx:b', 'contacts:b');
+  db.linkPersons('contacts:b', 'steam:b');
+  presenceOn('vrcx', 'b', 'online', 5000);
+
+  const e = digest.whoIsOnNow().people[0];
+  assert.equal(e.displayName, 'Badger VR', 'the identity you most recently saw them on');
+  assert.equal(e.handle, 'badgerVR');
+  assert.equal(e.avatarUrl, 'https://cdn.example/av.png', 'kept from the only identity that has one');
+  assert.equal(e.birthday, '03-04', 'kept from the only identity that has one');
+  assert.equal(e.pronouns, 'they/them');
+  assert.equal(e.note, 'met at the meetup');
+  // Every value is ONE identity's, verbatim — nothing is merged or invented.
+  assert.ok(!/Badger VR.*badgr/.test(String(e.displayName)));
+});
+
+test('statusBoard: a linked human is listed once, with their newest status text', () => {
+  seedOn('vrcx', 's');
+  seedOn('discord', 's');
+  db.linkPersons('vrcx:s', 'discord:s');
+  db.insertObservation({ source: 'discord', sourceId: 's', kind: 'status', text: 'older, on discord', ts: 100 });
+  db.insertObservation({ source: 'vrcx', sourceId: 's', kind: 'status', text: '🏖 away till the 20th', ts: 200 });
+
+  const board = digest.statusBoard();
+  assert.equal(board.length, 1, 'one human, not one row per platform');
+  assert.equal(board[0].text, '🏖 away till the 20th');
+  assert.equal(board[0].ts, 200);
+  assert.equal(board[0].source, 'vrcx', 'which identity said it');
+  assert.equal(board[0].person.identities.length, 2);
+});
+
+test('listPeople: the roster collapses to humans; people.list still lists identities', () => {
+  seedOn('steam', 'm', { displayName: 'Marlow' });
+  seedOn('vrcx', 'm', { displayName: 'Marlow VR' });
+  seedOn('discord', 'm', { displayName: 'marlow' });
+  seedOn('vrcx', 'solo', { displayName: 'Solo' });
+  db.linkPersons('steam:m', 'vrcx:m');
+  db.linkPersons('vrcx:m', 'discord:m');
+
+  assert.equal(db.listPersons({}).length, 4, 'people.list is unchanged — the link picker needs identities');
+  const humans = digest.listPeople({});
+  assert.equal(humans.length, 2, 'three linked identities + one unlinked = two humans');
+  const merged = humans.find((h) => h.identities.length === 3);
+  assert.ok(merged, 'the linked human carries all three platforms');
+  assert.deepEqual(idsOf(merged), ['discord:m', 'steam:m', 'vrcx:m']);
+  assert.ok(humans.some((h) => h.id === 'vrcx:solo' && h.identities.length === 1));
+});
+
+test('listPeople: a human matches if ANY identity does, and keeps the whole cluster', () => {
+  seedOn('steam', 'm', { displayName: 'Marlow', handle: 'marlowgears' });
+  seedOn('discord', 'm', { displayName: 'zzz-other-name', handle: 'zzz' });
+  db.linkPersons('steam:m', 'discord:m');
+
+  const hits = digest.listPeople({ q: 'marlow' });
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].identities.length, 2, 'the Discord half comes along, though it did not match');
+});
+
+test('listPeople: never returns the reserved self person', () => {
+  seedOn('vrcx', 'a');
+  assert.ok(!digest.listPeople({}).some((h) => h.source === 'self'));
+  assert.ok(!digest.listPeople({}).some((h) => h.identities.some((i) => i.source === 'self')));
+});
+
+test('cluster entries carry displayId — the identity the card is NAMED after', () => {
+  seedOn('discord', 'm', { displayName: 'marlow', handle: 'marlow' }, 1000);
+  seedOn('vrcx', 'm', { displayName: 'Marlow VR', handle: 'marlowVR' }, 500);
+  db.linkPersons('discord:m', 'vrcx:m');
+  presenceOn('vrcx', 'm', 'online', 9000);
+
+  const e = digest.whoIsOnNow().people[0];
+  assert.equal(e.id, 'discord:m', 'the stable key is the smallest member id');
+  assert.equal(e.displayName, 'Marlow VR');
+  assert.equal(e.displayId, 'vrcx:m', 'opening the card lands on the identity it shows');
+  // Both are real member ids — people.get accepts either and returns the cluster.
+  assert.ok(db.getPerson(e.displayId));
+  assert.deepEqual(db.cluster(e.displayId).sort(), db.cluster(e.id).sort());
+});

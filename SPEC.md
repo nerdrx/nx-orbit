@@ -312,8 +312,15 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- schema_version, settin
 
 Living in `src/main/digest.js`, exposed over IPC. Each is a documented query:
 
-- **`whoIsOnNow()`** — latest `presence` per person; those whose latest is
-  online. Count + list.
+- **`whoIsOnNow()`** — latest `presence` per identity, then **collapsed to one
+  entry per human** via the identity cluster (§2.1). A person you have linked
+  across Steam, Discord and VRChat is **one card, not three**: the entry carries
+  `identities[]`, each with its own `source`, `status`, `place` and `ts`, so the
+  UI can show every platform badge and which of them they are on right now. A
+  human counts as online if **any** identity is online, and `count` counts
+  humans, not identities — otherwise linking someone would inflate your
+  "who's around" number, which would be a lie about how many friends are there.
+  Unlinked identities are their own single-identity entries, unchanged.
 - **`overlapHeatmap(personId?)`** → `{grid: number[7][24], max, windowDays,
   metric, selfHours, friendsConsidered}`. If `personId` is omitted, aggregates
   across all friends = "when is my circle around." **This is a histogram of past
@@ -374,7 +381,7 @@ derivation ever needs a model, it doesn't belong in Orbit.
 ## 6. IPC surface (`window.orbit`, the only thing the renderer can touch)
 
 ```
-orbit.digest.whoIsOnNow()            → { count, people[] }
+orbit.digest.whoIsOnNow()            → { count, people[] }  // one entry per HUMAN; each carries identities[] with per-platform status (§5)
 orbit.digest.heatmap(personId?)      → { grid:number[7][24], max, windowDays }
 orbit.digest.birthdays(withinDays?)  → [{ person, nextDate, daysAway }]
 orbit.digest.statusBoard()           → [{ person, status, text, ts }]
