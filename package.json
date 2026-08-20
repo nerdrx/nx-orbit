@@ -27,9 +27,11 @@
     "files": [
       "src/**/*",
       "assets/**/*",
+      "plugins/**/*",
       "package.json",
       "!test/**/*",
-      "!dist/**/*"
+      "!dist/**/*",
+      "!plugins/**/node_modules/**"
     ],
     "linux": {
       "target": "AppImage",
