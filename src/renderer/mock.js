@@ -212,7 +212,24 @@ if (!window.orbit) {
     { source: 'discord', sourceId: '219660',    handle: 'novah',      displayName: 'Novah',  online: true,  birthday: null,    pronouns: 'she/they',  statusText: 'on holiday in Kyoto 🗼 slow replies', statusKind: 'askme', place: '', bio: 'away, eating everything.', note: 'Back end of the month.', peak: 'day', weekendBias: 1.0 },
     { source: 'vrcx',    sourceId: 'usr_e58a',  handle: 'fenn',       displayName: 'Fenn',   online: false, birthday: '08-21', pronouns: 'he/him',    statusText: '', statusKind: 'offline', place: '', bio: 'world-builder. always cooking.', note: 'Birthday tomorrow — say hi.', peak: 'eve', weekendBias: 1.1 },
     { source: 'twitter', sourceId: '90277314',  handle: 'cassthreads', displayName: 'Cass',  online: true,  birthday: null,    pronouns: 'she/her',   statusText: '', statusKind: 'online', place: '', bio: 'threads about tiny UIs.', note: 'Good eye for glass. Ask about the OLED theme.', peak: 'day', weekendBias: 0.7 },
+
+    // -- cross-source identity demo (SPEC §2.1) --------------------------------
+    // The SAME invented human on three sources, with slight name variations, so
+    // linkSuggestions() returns real candidates for the operator to confirm.
+    // None of these are real people — every name here is made up.
+    { source: 'steam',   sourceId: '7656119railway', handle: 'badger',   displayName: 'Badger',    online: true,  birthday: null,    pronouns: 'they/them', statusText: '', statusKind: 'online', place: '', bio: 'digs holes in blender.', note: '', peak: 'night', weekendBias: 1.1 },
+    { source: 'discord', sourceId: '540221badger',   handle: 'badger',   displayName: 'badger_',   online: false, birthday: '10-02', pronouns: 'they/them', statusText: '', statusKind: 'offline', place: '', bio: '', note: '', peak: 'night', weekendBias: 1.1 },
+    { source: 'vrcx',    sourceId: 'usr_badger7f',   handle: 'badgerVR', displayName: 'Badger 🦡', online: true,  birthday: null,    pronouns: 'they/them', statusText: 'building a burrow world', statusKind: 'joinme', place: 'Hollow Barn', bio: 'worldbuilder, nocturnal.', note: '', peak: 'night', weekendBias: 1.2 },
+
+    // An ALREADY-LINKED cluster (see SEED_LINKS below), so the "Also on other
+    // platforms" + Unlink path renders on first open without any setup.
+    { source: 'vrcx',    sourceId: 'usr_noct91',     handle: 'noctis',   displayName: 'Noctis',    online: true,  birthday: null,    pronouns: 'she/her',   statusText: '', statusKind: 'askme', place: 'Prismatic Void', bio: 'aurora chaser.', note: 'Met at the winter meetup.', peak: 'night', weekendBias: 1.0 },
+    { source: 'discord', sourceId: '778430noct',     handle: 'noctis9',  displayName: 'Noctis',    online: false, birthday: '12-14', pronouns: 'she/her',   statusText: '', statusKind: 'offline', place: '', bio: '', note: '', peak: 'eve', weekendBias: 1.0 },
   ];
+
+  // Operator-asserted links present on first load (SPEC §2.1). Undirected pairs
+  // of person ids; the cluster is their transitive closure, recomputed on read.
+  const SEED_LINKS = [['vrcx:usr_noct91', 'discord:778430noct']];
 
   const ROSTER_SIZE = 411;   // what a real, well-used roster looks like
   const ONLINE_TARGET = 45;  // a normal Thursday evening
@@ -334,6 +351,50 @@ if (!window.orbit) {
   const rawById = new Map(FRIENDS.map((p) => [idOf(p), p]));
   rawById.set(idOf(SELF), SELF);
   const notes = new Map(PEOPLE.map((p) => [p.id, p.note]));
+
+  // -- identity clusters (SPEC §2.1) -----------------------------------------
+  // Links are undirected edges; the cluster is the transitive closure. Stored
+  // as canonical "min|max" keys so an edge is recorded once regardless of the
+  // order it was asserted in — the real core stores it directionally and closes
+  // over both orientations, which comes out to the same clusters.
+  const LINKS = new Set();
+  const linkKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  for (const [a, b] of SEED_LINKS) if (byId.has(a) && byId.has(b)) LINKS.add(linkKey(a, b));
+
+  function clusterOf(id) {
+    const seen = new Set([id]);
+    const queue = [id];
+    while (queue.length) {
+      const cur = queue.shift();
+      for (const key of LINKS) {
+        const [x, y] = key.split('|');
+        const other = x === cur ? y : y === cur ? x : null;
+        if (other && !seen.has(other)) { seen.add(other); queue.push(other); }
+      }
+    }
+    return [...seen].filter((cid) => byId.has(cid));
+  }
+
+  // Same normalizer/scorer the core uses (digest.js), so the standalone demo
+  // ranks candidates exactly like the real bridge.
+  function normKey(s) {
+    return String(s ?? '').normalize('NFKD').replace(/\p{M}+/gu, '').replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
+  }
+  const MIN_KEY = 3;
+  function bestMatch(a, b) {
+    const ah = normKey(a.handle), an = normKey(a.displayName);
+    const bh = normKey(b.handle), bn = normKey(b.displayName);
+    if (ah.length >= MIN_KEY && ah === bh) return { score: 3, reason: `same handle: ${a.handle || ah}` };
+    if (an.length >= MIN_KEY && an === bn) return { score: 2, reason: `same name: ${a.displayName || an}` };
+    const aKeys = [ah, an].filter((k) => k.length >= MIN_KEY);
+    const bKeys = [bh, bn].filter((k) => k.length >= MIN_KEY);
+    for (const ak of aKeys) for (const bk of bKeys) {
+      if (ak === bk || ak.includes(bk) || bk.includes(ak)) {
+        return { score: 1, reason: `name ${a.displayName || a.handle} ~ ${b.displayName || b.handle}` };
+      }
+    }
+    return null;
+  }
 
   // -- overlap heatmap -------------------------------------------------------
   // A believable 7×24 grid of "hours you and this friend were BOTH online",
@@ -486,7 +547,24 @@ if (!window.orbit) {
       // not hours of your life — the view has to say which one it is showing.
       heatmap(personId) {
         const single = personId && GRIDS.has(personId);
-        const g = single ? GRIDS.get(personId) : aggregateGrid();
+        let g;
+        if (single) {
+          // Union the whole identity cluster's grids (element-wise max) so a
+          // linked friend's Steam + VRChat presence reads as one merged grid —
+          // the core does this exactly, over presence buckets.
+          const ids = clusterOf(personId).filter((cid) => GRIDS.has(cid));
+          if (ids.length > 1) {
+            g = Array.from({ length: 7 }, () => new Array(24).fill(0));
+            for (const cid of ids) {
+              const gg = GRIDS.get(cid);
+              for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) g[d][h] = Math.max(g[d][h], gg[d][h]);
+            }
+          } else {
+            g = GRIDS.get(personId);
+          }
+        } else {
+          g = aggregateGrid();
+        }
         return clone({
           grid: g,
           max: gridMax(g),
@@ -545,17 +623,69 @@ if (!window.orbit) {
       },
       get(id) {
         if (!byId.has(id)) return null;
-        return clone({ person: publicPerson(id), timeline: TIMELINES.get(id) || [] });
+        const ids = clusterOf(id);
+        // identities = the whole cluster incl. the queried id (SPEC §6), so the
+        // card can show "also on Steam / Discord".
+        const identities = ids.map((cid) => publicPerson(cid));
+        // timeline = union across the cluster, reverse-chron, each row already
+        // tagged with the source it came from (timelineFor stamps it).
+        const timeline = [];
+        for (const cid of ids) for (const e of TIMELINES.get(cid) || []) timeline.push(e);
+        timeline.sort((a, b) => b.ts - a.ts);
+        return clone({ person: publicPerson(id), identities, timeline });
       },
       setNote(id, text) {
         if (byId.has(id)) notes.set(id, String(text ?? ''));
         return { ok: true };
       },
       link(idA, idB) {
-        const a = byId.get(idA);
-        const b = byId.get(idB);
-        if (a && b) a.links.push({ source: b.source, sourceId: b.sourceId });
+        if (idA === idB) throw new Error('cannot link a person to themselves');
+        if (idA.startsWith('self:') || idB.startsWith('self:')) throw new Error('the reserved self person cannot be linked');
+        if (byId.has(idA) && byId.has(idB)) {
+          LINKS.add(linkKey(idA, idB));
+          aggCache = null;
+        }
         return { ok: true };
+      },
+      unlink(idA, idB) {
+        LINKS.delete(linkKey(idA, idB));
+        aggCache = null;
+        return { ok: true };
+      },
+      // Candidates to CONFIRM — pure string comparison, applies nothing.
+      linkSuggestions(personId) {
+        const roster = PEOPLE.map((p) => publicPerson(p.id));
+        if (personId) {
+          const base = publicPerson(personId);
+          if (!base) return [];
+          const inCluster = new Set(clusterOf(personId));
+          const out = [];
+          for (const c of roster) {
+            if (c.source === base.source) continue;
+            if (inCluster.has(c.id)) continue;
+            const m = bestMatch(base, c);
+            if (m) out.push({ a: base.id, b: c.id, person: base, candidate: c, score: m.score, reason: m.reason });
+          }
+          out.sort((x, y) => y.score - x.score || (x.candidate.id < y.candidate.id ? -1 : 1));
+          return clone(out);
+        }
+        const out = [];
+        const seen = new Set();
+        for (let i = 0; i < roster.length; i++) {
+          for (let j = i + 1; j < roster.length; j++) {
+            const p = roster[i], q = roster[j];
+            if (p.source === q.source) continue;
+            const m = bestMatch(p, q);
+            if (!m) continue;
+            if (clusterOf(p.id).includes(q.id)) continue;
+            const key = linkKey(p.id, q.id);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push({ a: p.id, b: q.id, person: p, candidate: q, score: m.score, reason: m.reason });
+          }
+        }
+        out.sort((x, y) => y.score - x.score);
+        return clone(out.slice(0, 50));
       },
       forget(id) {
         const p = byId.get(id);
@@ -566,6 +696,7 @@ if (!window.orbit) {
           GRIDS.delete(id);
           HAS_OVERLAP.delete(id);
           TIMELINES.delete(id);
+          for (const key of [...LINKS]) { const [x, y] = key.split('|'); if (x === id || y === id) LINKS.delete(key); }
           aggCache = null;
           const i = PEOPLE.findIndex((x) => x.id === id);
           if (i >= 0) PEOPLE.splice(i, 1);

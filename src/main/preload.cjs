@@ -27,6 +27,8 @@ const orbit = {
     setNote: (id, text) => call('people.setNote', id, text),
     addManual: (person) => call('people.addManual', person),
     link: (idA, idB) => call('people.link', idA, idB),
+    unlink: (idA, idB) => call('people.unlink', idA, idB),
+    linkSuggestions: (id) => call('people.linkSuggestions', id),
     forget: (id) => call('people.forget', id),
   },
   sources: {

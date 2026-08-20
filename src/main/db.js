@@ -278,14 +278,77 @@ export function setNote(id, text) {
   return true;
 }
 
+// Assert "same human" across platforms (SPEC §2.1). The edge is symmetric and
+// transitive; the *cluster* (transitive closure) is derived on read by
+// cluster(). Two guards make the model honest:
+//   • a person can never be linked to themselves (id === id) — a no-op edge that
+//     would only muddy the closure;
+//   • the reserved `self` person is NEVER linkable (§2.1) — it is a presence
+//     anchor, not a friend identity, and merging it into a cluster would poison
+//     that person's timeline and heatmap with the operator's own history.
+// Linking two ids that are ALREADY in one cluster is a harmless no-op: the extra
+// direct edge (or the IGNOREd duplicate) changes no closure.
 export function linkPersons(idA, idB, ts = Date.now()) {
   const a = parsePersonId(idA);
   const b = parsePersonId(idB);
+  if (a.source === b.source && a.sourceId === b.sourceId) {
+    throw new Error('cannot link a person to themselves');
+  }
+  if (a.source === SELF.source || b.source === SELF.source) {
+    throw new Error('the reserved self person cannot be linked');
+  }
   db.prepare(
     `INSERT OR IGNORE INTO person_link (a_source, a_id, b_source, b_id, created_at)
      VALUES (?, ?, ?, ?, ?)`
   ).run(a.source, a.sourceId, b.source, b.sourceId, ts);
   return true;
+}
+
+// Remove ONE asserted edge, in whichever stored orientation ((a,b) or (b,a)) it
+// exists. Only that edge — the rest of the cluster survives, because the closure
+// is recomputed on the next cluster() call. Unlinking a middle node of a chain
+// (A–B–C, unlink B–C) therefore splits it into {A,B} and {C}, as it should.
+export function unlinkPersons(idA, idB) {
+  const a = parsePersonId(idA);
+  const b = parsePersonId(idB);
+  db.prepare(
+    `DELETE FROM person_link
+      WHERE (a_source = ? AND a_id = ? AND b_source = ? AND b_id = ?)
+         OR (a_source = ? AND a_id = ? AND b_source = ? AND b_id = ?)`
+  ).run(
+    a.source, a.sourceId, b.source, b.sourceId,
+    b.source, b.sourceId, a.source, a.sourceId
+  );
+  return true;
+}
+
+// The identity CLUSTER of `id`: the transitive closure of person ids reachable
+// through person_link, following edges in BOTH stored directions, and INCLUDING
+// `id` itself. Pure BFS with a visited set, so a cycle (A–B, B–A, or a longer
+// loop) terminates instead of spinning. Returns an array of "source:sourceId"
+// strings; order is breadth-first from `id`.
+export function cluster(id) {
+  const { source: s0, sourceId: i0 } = parsePersonId(id); // validate + normalise
+  const start = personId(s0, i0);
+  const seen = new Set([start]);
+  const queue = [start];
+  const stmt = db.prepare(
+    `SELECT a_source, a_id, b_source, b_id FROM person_link
+      WHERE (a_source = ? AND a_id = ?) OR (b_source = ? AND b_id = ?)`
+  );
+  while (queue.length) {
+    const cur = queue.shift();
+    const { source, sourceId } = parsePersonId(cur);
+    for (const r of stmt.all(source, sourceId, source, sourceId)) {
+      for (const nid of [personId(r.a_source, r.a_id), personId(r.b_source, r.b_id)]) {
+        if (!seen.has(nid)) {
+          seen.add(nid);
+          queue.push(nid);
+        }
+      }
+    }
+  }
+  return [...seen];
 }
 
 export function getLinks(id) {

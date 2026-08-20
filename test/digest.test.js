@@ -67,6 +67,12 @@ function selfSession(start, end) {
   db.insertObservation({ source: 'self', sourceId: 'me', kind: 'presence', status: 'online', ts: start });
   db.insertObservation({ source: 'self', sourceId: 'me', kind: 'presence', status: 'offline', ts: end });
 }
+// A presence session for a DISCORD identity (the cluster tests link a vrcx and a
+// discord identity as one human; the vrcx-only `session` helper can't seed b).
+function discordSession(sourceId, start, end) {
+  db.insertObservation({ source: 'discord', sourceId, kind: 'presence', status: 'online', ts: start });
+  db.insertObservation({ source: 'discord', sourceId, kind: 'presence', status: 'offline', ts: end });
+}
 
 // Independent oracle for "which cells should this interval light": sample every
 // minute of real time and collect the distinct (local date, local hour) it
@@ -406,4 +412,122 @@ test('personTimeline: one friend, reverse-chron, parses meta', () => {
   assert.equal(tl.length, 2);
   assert.equal(tl[0].ts, 200);
   assert.deepEqual(tl[1].meta, { previous: 'A' });
+});
+
+// --- linked-cluster derivations (SPEC §2.1 / §5) ----------------------------
+test('personTimeline: unions a linked cluster and tags each row with its source', () => {
+  db.upsertPerson({ source: 'vrcx', sourceId: 'a', displayName: 'A' });
+  db.upsertPerson({ source: 'discord', sourceId: 'b', displayName: 'B' });
+  db.insertObservation({ source: 'vrcx', sourceId: 'a', kind: 'presence', status: 'online', ts: 100 });
+  db.insertObservation({ source: 'discord', sourceId: 'b', kind: 'presence', status: 'online', ts: 300 });
+  db.insertObservation({ source: 'discord', sourceId: 'b', kind: 'bio', text: 'hi', ts: 200 });
+
+  // Before linking: only A's own row.
+  assert.equal(digest.personTimeline('vrcx:a').length, 1);
+
+  db.linkPersons('vrcx:a', 'discord:b');
+  const tl = digest.personTimeline('vrcx:a');
+  assert.equal(tl.length, 3);
+  assert.deepEqual(tl.map((e) => e.ts), [300, 200, 100]); // merged, reverse-chron
+  assert.equal(tl[0].source, 'discord'); // per-source tag present
+  assert.equal(tl[2].source, 'vrcx');
+});
+
+test('overlapHeatmap(single): a linked cluster combines both identities’ presence', () => {
+  db.upsertPerson({ source: 'vrcx', sourceId: 'a', displayName: 'A' });
+  db.upsertPerson({ source: 'discord', sourceId: 'b', displayName: 'B' });
+
+  // Self is online across a wide window on a single day.
+  selfSession(at(3, 8), at(3, 20));
+  // A alone covers 10:00-13:00; B (a DIFFERENT source) covers 14:00-17:00. Self
+  // covers both, so linking A+B should union their overlap into one grid.
+  session('a', at(3, 10), at(3, 13)); // hours 10,11,12
+  discordSession('b', at(3, 14), at(3, 17)); // hours 14,15,16
+
+  const only = digest.overlapHeatmap('vrcx:a');
+  const aTotal = only.grid.flat().reduce((s, v) => s + v, 0);
+  assert.equal(aTotal, 3); // A alone: 3 overlapping hours
+
+  db.linkPersons('vrcx:a', 'discord:b');
+  const merged = digest.overlapHeatmap('vrcx:a');
+  const mergedTotal = merged.grid.flat().reduce((s, v) => s + v, 0);
+  assert.equal(mergedTotal, 6); // union of both identities' hours (3 + 3)
+  assert.ok(mergedTotal >= aTotal, 'union is at least each part');
+  assert.equal(merged.friendsConsidered, 1); // still ONE human
+});
+
+test('overlapHeatmap(single): overlapping identity hours count a date only once', () => {
+  db.upsertPerson({ source: 'vrcx', sourceId: 'a', displayName: 'A' });
+  db.upsertPerson({ source: 'discord', sourceId: 'b', displayName: 'B' });
+  selfSession(at(3, 8), at(3, 20));
+  session('a', at(3, 10), at(3, 13)); // 10,11,12
+  discordSession('b', at(3, 11), at(3, 14)); // 11,12,13 — overlaps A on 11,12
+  db.linkPersons('vrcx:a', 'discord:b');
+  const merged = digest.overlapHeatmap('vrcx:a');
+  const total = merged.grid.flat().reduce((s, v) => s + v, 0);
+  assert.equal(total, 4); // union {10,11,12,13}, each date-hour once
+  assert.equal(merged.max, 1); // no cell double-counted
+});
+
+// --- linkSuggestions (pure string comparison, applies NOTHING) --------------
+function linkCount() {
+  return db.getDb().prepare('SELECT COUNT(*) c FROM person_link').get().c;
+}
+
+test('linkSuggestions: finds an exact cross-source handle match', () => {
+  db.upsertPerson({ source: 'steam', sourceId: 'a', handle: 'badger', displayName: 'Badger' });
+  db.upsertPerson({ source: 'discord', sourceId: 'b', handle: 'badger', displayName: 'badger_' });
+
+  const s = digest.linkSuggestions('steam:a');
+  assert.equal(s.length, 1);
+  assert.equal(s[0].a, 'steam:a');
+  assert.equal(s[0].b, 'discord:b');
+  assert.equal(s[0].score, 3);
+  assert.match(s[0].reason, /same handle/);
+  assert.equal(s[0].person.id, 'steam:a');
+  assert.equal(s[0].candidate.id, 'discord:b');
+});
+
+test('linkSuggestions: ranks an exact handle match above a mere substring match', () => {
+  db.upsertPerson({ source: 'steam', sourceId: 'a', handle: 'badger', displayName: 'Badger' });
+  db.upsertPerson({ source: 'discord', sourceId: 'b', handle: 'badger', displayName: 'badger_' }); // exact handle
+  db.upsertPerson({ source: 'vrcx', sourceId: 'c', handle: 'badgerVR', displayName: 'Badger Set' }); // substring
+
+  const s = digest.linkSuggestions('steam:a');
+  assert.equal(s.length, 2);
+  assert.equal(s[0].b, 'discord:b'); // exact first
+  assert.ok(s[0].score > s[1].score);
+  assert.equal(s[1].b, 'vrcx:c');
+});
+
+test('linkSuggestions: excludes same-source, already-clustered, and self', () => {
+  db.upsertPerson({ source: 'steam', sourceId: 'a', handle: 'badger', displayName: 'Badger' });
+  db.upsertPerson({ source: 'steam', sourceId: 'a2', handle: 'badger', displayName: 'Badger' }); // SAME source
+  db.upsertPerson({ source: 'discord', sourceId: 'b', handle: 'badger', displayName: 'Badger' });
+  // Give the self person a colliding handle to prove self is never a candidate.
+  db.getDb().prepare("UPDATE person SET handle='badger', display_name='Badger' WHERE source='self'").run();
+
+  let s = digest.linkSuggestions('steam:a');
+  assert.deepEqual(s.map((x) => x.b).sort(), ['discord:b']); // not steam:a2, not self:me
+
+  db.linkPersons('steam:a', 'discord:b'); // now already one human
+  s = digest.linkSuggestions('steam:a');
+  assert.equal(s.length, 0); // clustered → no longer suggested
+});
+
+test('linkSuggestions: is pure — the link count is unchanged after calling it', () => {
+  db.upsertPerson({ source: 'steam', sourceId: 'a', handle: 'badger', displayName: 'Badger' });
+  db.upsertPerson({ source: 'discord', sourceId: 'b', handle: 'badger', displayName: 'Badger' });
+  const before = linkCount();
+  digest.linkSuggestions('steam:a');
+  digest.linkSuggestions(); // roster-wide too
+  assert.equal(linkCount(), before);
+});
+
+test('linkSuggestions: roster-wide de-dups and is cross-source only', () => {
+  db.upsertPerson({ source: 'steam', sourceId: 'a', handle: 'badger', displayName: 'Badger' });
+  db.upsertPerson({ source: 'discord', sourceId: 'b', handle: 'badger', displayName: 'Badger' });
+  const s = digest.linkSuggestions();
+  assert.equal(s.length, 1); // (a,b) once, never also (b,a)
+  assert.notEqual(s[0].person.source, s[0].candidate.source);
 });

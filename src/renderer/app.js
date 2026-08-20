@@ -166,7 +166,7 @@ const OBS_ICON = { presence: I.presence, status: I.status, location: I.location,
 
 /* ------------------------------------------------------- small builders */
 function srcBadge(source) {
-  const label = { vrcx: 'VRChat', discord: 'Discord', twitter: 'X', manual: 'Manual' }[source] || source;
+  const label = { vrcx: 'VRChat', discord: 'Discord', twitter: 'X', steam: 'Steam', contacts: 'Contacts', mastodon: 'Mastodon', matrix: 'Matrix', lastfm: 'Last.fm', manual: 'Manual' }[source] || source;
   return `<span class="badge-src" data-src="${esc(source)}"><span class="sdot"></span>${esc(label)}</span>`;
 }
 function sectionLabel(text) {
@@ -821,6 +821,11 @@ function errorState(err) {
 /* =====================================================================
    PERSON SHEET (tier 2 slide-over)
    ===================================================================== */
+// One live keydown handler for the sheet, cleared on close and re-established on
+// every refresh (a link/unlink re-opens the sheet in place). Kept at module
+// scope so a refresh can't leak a second Escape listener.
+let sheetKeyHandler = null;
+
 async function openPerson(id) {
   if (!id) return;
   let data;
@@ -835,15 +840,28 @@ async function openPerson(id) {
     return;
   }
   const { person } = data;
+  const identities = asArray(data.identities);
   const timeline = asArray(data.timeline);
 
   const root = $('#sheet-root');
-  root.innerHTML = await personSheet(person, timeline);
+  root.innerHTML = await personSheet(person, identities, timeline);
 
   const scrim = $('.scrim', root);
-  const closeAll = () => { root.innerHTML = ''; document.removeEventListener('keydown', onKey); };
-  const onKey = (e) => { if (e.key === 'Escape') closeAll(); };
-  document.addEventListener('keydown', onKey);
+  const closeAll = () => {
+    root.innerHTML = '';
+    if (sheetKeyHandler) document.removeEventListener('keydown', sheetKeyHandler);
+    sheetKeyHandler = null;
+  };
+  if (sheetKeyHandler) document.removeEventListener('keydown', sheetKeyHandler);
+  sheetKeyHandler = (e) => {
+    if (e.key !== 'Escape') return;
+    // If the link picker is open, Escape collapses it first, not the whole sheet.
+    const picker = $('.link-picker', root);
+    const opener = $('[data-link-open]', root);
+    if (picker && !picker.hidden) { closePicker(picker, opener); opener.focus(); return; }
+    closeAll();
+  };
+  document.addEventListener('keydown', sheetKeyHandler);
   scrim.addEventListener('click', closeAll);
   $('.sheet-close', root).addEventListener('click', closeAll);
   $('.sheet-close', root).focus();
@@ -863,12 +881,174 @@ async function openPerson(id) {
     }
   });
 
+  // identity cluster: unlink existing, and the link picker (suggestions + search)
+  wireIdentities(root, person, identities);
+
   // forget (confirm)
   $('[data-forget]', root).addEventListener('click', () => confirmForget(person, closeAll));
 }
 
-async function personSheet(p, timeline) {
+// Collapse the link picker back to its trigger.
+function closePicker(picker, opener) {
+  picker.hidden = true;
+  if (opener) opener.setAttribute('aria-expanded', 'false');
+}
+
+// Wire the "Also on other platforms" section: Unlink controls on each linked
+// identity, and the "Link another identity" picker (one-click suggestions +
+// a search over everyone else). Nothing here links automatically — every link
+// is an explicit click by the operator (charter §0.3).
+function wireIdentities(root, person, identities) {
+  const clusterIds = new Set(identities.map((p) => p.id));
+
+  // Unlink (confirm first — it splits the cluster).
+  root.querySelectorAll('[data-unlink]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const otherId = btn.dataset.unlink;
+      const other = identities.find((p) => p.id === otherId);
+      confirmDialog({
+        title: `Unlink ${safeName(other?.displayName || other?.handle || 'this identity', 28)}?`,
+        body: 'This removes the asserted "same human" link. Neither person is deleted — their histories just stop being merged. You can re-link them any time.',
+        confirmLabel: 'Unlink',
+      }, async () => {
+        try {
+          await orbit.people.unlink(person.id, otherId);
+          toast('Unlinked — the histories are separate again.', 'ok');
+          openPerson(person.id); // refresh: cluster shrinks, timeline/heatmap split
+        } catch (err) {
+          toast(`Could not unlink — ${err?.message || 'the core did not answer.'}`, 'danger');
+        }
+      });
+    });
+  });
+
+  // The picker.
+  const opener = $('[data-link-open]', root);
+  const picker = $('.link-picker', root);
+  const suggWrap = $('[data-link-suggests]', root);
+  const search = $('[data-link-search]', root);
+  const results = $('[data-link-results]', root);
+  if (!opener || !picker) return;
+
+  let loaded = false;
+  const doLink = async (candidateId) => {
+    try {
+      await orbit.people.link(person.id, candidateId);
+      toast('Linked — same human, one card now. Undo any time with Unlink.', 'ok');
+      openPerson(person.id); // refresh: merged cluster, timeline, mini-heatmap
+    } catch (err) {
+      toast(`Could not link — ${err?.message || 'the core did not answer.'}`, 'danger');
+    }
+  };
+
+  // One delegated click handler for every [data-link] row in the picker.
+  picker.addEventListener('click', (e) => {
+    const row = e.target.closest('[data-link]');
+    if (row) { e.preventDefault(); doLink(row.dataset.link); }
+  });
+
+  opener.addEventListener('click', async () => {
+    const willOpen = picker.hidden;
+    picker.hidden = !willOpen;
+    opener.setAttribute('aria-expanded', String(willOpen));
+    if (!willOpen) return;
+    if (!loaded) {
+      loaded = true;
+      suggWrap.innerHTML = '<p class="pc-none">Looking for likely matches…</p>';
+      let sugg = [];
+      try { sugg = asArray(await orbit.people.linkSuggestions(person.id)); } catch { sugg = []; }
+      suggWrap.innerHTML = sugg.length
+        ? `<div class="micro sugg-head">Suggested matches · confirm each one</div>${sugg.map(suggestRow).join('')}`
+        : '<p class="pc-none">No likely matches found — use the search below to link someone by hand.</p>';
+    }
+    if (search) search.focus();
+  });
+
+  // Free search over everyone else (people the suggester didn't catch).
+  let linkSearchToken = 0;
+  if (search) {
+    search.addEventListener('input', async () => {
+      const q = search.value.trim();
+      const token = ++linkSearchToken;
+      if (!q) { results.innerHTML = ''; return; }
+      let list;
+      try { list = asArray(await orbit.people.list({ q })); } catch { return; }
+      if (token !== linkSearchToken) return;
+      const rows = list.filter((p) => !clusterIds.has(p.id)); // exclude self + already-linked
+      results.innerHTML = rows.length
+        ? rows.slice(0, 30).map(searchLinkRow).join('')
+        : `<p class="pc-none">No one else matches “${esc(safeName(q, 24))}”.</p>`;
+    });
+  }
+}
+
+// One linked identity (not the person themselves) — source badge, handle/name,
+// and an Unlink control.
+function linkedIdRow(p) {
+  const n = nameCell(p.displayName);
+  return `
+    <div class="linked-id">
+      ${srcBadge(p.source)}
+      <span class="li-name"><b class="t-clip">@${esc(p.handle)}</b><small class="t-clip"${n.title}>${n.html}</small></span>
+      <button class="btn ghost sm" data-unlink="${esc(p.id)}" aria-label="Unlink ${esc(n.full)}">Unlink</button>
+    </div>`;
+}
+
+// A suggested same-human — the whole row is a one-click Link control, and it
+// carries the human-readable reason it was proposed.
+function suggestRow(s) {
+  const c = s.candidate;
+  const n = nameCell(c.displayName);
+  return `
+    <button class="suggest-row" data-link="${esc(c.id)}" aria-label="Link ${esc(n.full)} on ${esc(c.source)}">
+      ${avatar(c, 'sm')}
+      <span class="sr-body">
+        <span class="sr-top"><b class="t-clip"${n.title}>${n.html}</b><small class="t-clip">@${esc(c.handle)}</small>${srcBadge(c.source)}</span>
+        <span class="sr-reason">${esc(s.reason || '')}</span>
+      </span>
+      <span class="link-cta">${I.add}Link</span>
+    </button>`;
+}
+
+// A free-search result — same one-click Link affordance, no reason line.
+function searchLinkRow(p) {
+  const n = nameCell(p.displayName);
+  return `
+    <button class="suggest-row" data-link="${esc(p.id)}" aria-label="Link ${esc(n.full)} on ${esc(p.source)}">
+      ${avatar(p, 'sm')}
+      <span class="sr-body">
+        <span class="sr-top"><b class="t-clip"${n.title}>${n.html}</b><small class="t-clip">@${esc(p.handle)}</small>${srcBadge(p.source)}</span>
+      </span>
+      <span class="link-cta">${I.add}Link</span>
+    </button>`;
+}
+
+// The "Also on other platforms" block: the linked cluster (this person's OTHER
+// identities), each unlinkable, plus a collapsible picker to link a new one.
+function identitiesSection(p, identities) {
+  const others = identities.filter((x) => x.id !== p.id);
+  const list = others.length
+    ? `<div class="linked-ids">${others.map(linkedIdRow).join('')}</div>`
+    : `<p class="pc-none">Not linked to any other identity yet. If ${esc(safeName(p.displayName, 22))} is also on another platform, link it below — one click, and their cards merge into one.</p>`;
+  return `
+    <div class="pc-section pc-identities">
+      <span class="micro">Also on other platforms</span>
+      ${list}
+      <div class="link-affordance">
+        <button class="btn sm link-open-btn" data-link-open aria-expanded="false" aria-controls="link-picker">${I.add}<span>Link another identity</span></button>
+      </div>
+      <div class="link-picker" id="link-picker" hidden>
+        <p class="link-reassure">${I.info}<span>These are matches for <b>you</b> to confirm — Orbit never links anyone automatically. Every link is one explicit click, and Unlink undoes it.</span></p>
+        <div class="link-suggests" data-link-suggests></div>
+        <div class="link-search"><span class="lsr-ico">${I.search}</span><input type="search" data-link-search placeholder="Search everyone else by name or handle…" autocomplete="off" spellcheck="false" aria-label="Search people to link" /></div>
+        <div class="link-results" data-link-results></div>
+      </div>
+    </div>`;
+}
+
+async function personSheet(p, identities, timeline) {
   const h = hueOf(p.id || p.displayName || 'x');
+  const multiSource = asArray(identities).length > 1;
 
   // The birthday label is local arithmetic on p.birthday — no second query.
   let bdayHtml = `<p class="pc-none">No birthday shared. VRChat and X don’t expose this — add it from the Add view if a friend tells you.</p>`;
@@ -898,6 +1078,7 @@ async function personSheet(p, timeline) {
         </div>
       </div>
       <div class="sheet-body">
+        ${identitiesSection(p, asArray(identities))}
         <div class="pc-section"><span class="micro">Status</span>${status}</div>
         <div class="pc-section"><span class="micro">Birthday</span>${bdayHtml}</div>
         ${p.bio ? `<div class="pc-section"><span class="micro">Their bio</span><div class="pc-status">${esc(p.bio)}</div></div>` : ''}
@@ -914,8 +1095,8 @@ async function personSheet(p, timeline) {
         </div>
 
         <div class="pc-section">
-          <span class="micro">Timeline</span>
-          ${timeline.length ? `<div class="timeline">${timeline.map(tlItem).join('')}</div>` : '<p class="pc-none">No observations recorded yet.</p>'}
+          <span class="micro">Timeline${multiSource ? ' <span class="hint" style="text-transform:none;letter-spacing:0">· merged across linked identities</span>' : ''}</span>
+          ${timeline.length ? `<div class="timeline">${timeline.map((e) => tlItem(e, multiSource)).join('')}</div>` : '<p class="pc-none">No observations recorded yet.</p>'}
         </div>
 
         <div class="danger-zone">
@@ -942,7 +1123,7 @@ async function miniHeat(id) {
   return `<div class="hm-scroll"><table class="mini-hm"><tbody>${rows}</tbody></table></div><div class="hint" style="margin-top:6px">7 days × 24 hours of past overlap — same histogram, in miniature.</div>`;
 }
 
-function tlItem(e) {
+function tlItem(e, showSource = false) {
   let line = '';
   if (e.kind === 'presence') line = `Went <span class="tl-em">${esc(e.status)}</span>${e.place ? ` in ${esc(e.place)}` : ''}`;
   else if (e.kind === 'status') line = `Status: <span class="tl-em">${esc(e.text || e.status)}</span>`;
@@ -952,11 +1133,39 @@ function tlItem(e) {
   else if (e.kind === 'avatar') line = 'Changed avatar';
   else if (e.kind === 'friend') line = e.meta?.became ? 'Became your friend' : 'Stopped being a friend';
   else line = esc(e.kind);
+  // When the card is a merged cluster, badge each row with the source it came
+  // from so the union is legible ("this line is the Discord identity").
+  const badge = showSource && e.source ? srcBadge(e.source) : '';
   return `
     <div class="tl-item">
       <span class="tl-dot">${OBS_ICON[e.kind] || I.status}</span>
-      <div class="tl-body"><div class="tl-line">${line}</div><div class="tl-when">${esc(fmtDate(e.ts))} · ${esc(fmtTime(e.ts))} · ${esc(relTime(e.ts))}</div></div>
+      <div class="tl-body"><div class="tl-line">${line}</div><div class="tl-when">${esc(fmtDate(e.ts))} · ${esc(fmtTime(e.ts))} · ${esc(relTime(e.ts))}${badge ? ` · ${badge}` : ''}</div></div>
     </div>`;
+}
+
+// A small, reusable confirm sheet (used by Unlink). Non-destructive by default;
+// pass danger:true for a red confirm button. onConfirm runs on confirm; the
+// dialog closes itself either way.
+function confirmDialog({ title, body, confirmLabel = 'Confirm', danger = false }, onConfirm) {
+  const root = $('#sheet-root');
+  const holder = document.createElement('div');
+  holder.innerHTML = `
+    <div class="scrim" style="z-index:49"></div>
+    <div class="confirm" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+      <h3>${esc(title)}</h3>
+      <p>${esc(body)}</p>
+      <div class="form-actions">
+        <button class="btn ghost sm" data-cancel>Cancel</button>
+        <button class="btn ${danger ? 'danger' : 'primary'} sm" data-confirm>${esc(confirmLabel)}</button>
+      </div>
+    </div>`;
+  root.appendChild(holder);
+  const cleanup = () => holder.remove();
+  $('[data-cancel]', holder).addEventListener('click', cleanup);
+  $('.scrim', holder).addEventListener('click', cleanup);
+  const go = $('[data-confirm]', holder);
+  go.addEventListener('click', () => { cleanup(); onConfirm(); });
+  go.focus();
 }
 
 function confirmForget(person, afterClose) {
