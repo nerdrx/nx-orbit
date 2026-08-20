@@ -140,6 +140,23 @@ Orbit knows about **people** and **observations about people**. That's it.
 "this Discord user is the same human as this VRChat user"; Orbit never guesses
 that automatically (§0.3).
 
+**Identity clusters.** A link is an operator-asserted, **symmetric** edge between
+two platform identities. Links are also **transitive**: if you link Steam↔Discord
+and Discord↔VRChat, all three are one person, and the cluster is the transitive
+closure over `person_link`. A person's card shows the whole cluster as one human
+— their birthday/pronouns/note taken from whichever identity carries them, and
+their timeline and per-person heatmap taken as the **union across every identity
+in the cluster** (so linking a friend's Steam to their VRChat combines both
+sources' presence into one "when are we both online").
+
+**Suggestions are candidates, never conclusions.** Orbit may *offer* likely
+same-human matches — other-source identities whose normalized handle or display
+name is similar (lowercased, stripped of decoration) — but it presents them for
+the operator to confirm one by one and **never links automatically**. String
+similarity offered for a human decision is not inference *about* a person; a link
+applied without that decision would be. The distinction is the charter (§0.3).
+The `self` person is never a link candidate and cannot be linked.
+
 **The reserved `self` person.** `(source:"self", sourceId:"me")` is *you* — the
 operator. It exists because the overlap heatmap (§5) needs a "me" axis: your own
 online history, so "hours we were both online" is computable. It is the one
@@ -321,7 +338,13 @@ Living in `src/main/digest.js`, exposed over IPC. Each is a documented query:
   board — verbatim text, no parsing.
 - **`changeFeed(sinceTs)`** — merged `bio`/`nick`/`avatar`/`friend`
   observations, reverse-chron. "What changed while I was away."
-- **`personTimeline(personId)`** — one friend's observations, reverse-chron.
+- **`personTimeline(personId)`** — one friend's observations, reverse-chron,
+  **unioned across their linked identity cluster** (§2.1) so a person you've
+  linked shows one merged history across Steam, Discord and VRChat.
+- **`linkSuggestions(personId?)`** — for a person (or across the roster), other
+  identities on *different* sources whose normalized handle/display name is
+  similar, scored and reason-tagged, for the operator to confirm. Pure string
+  comparison; it applies nothing.
 
 Every derivation is a function whose entire body is a SQL query + shaping. If a
 derivation ever needs a model, it doesn't belong in Orbit.
@@ -337,9 +360,11 @@ orbit.digest.birthdays(withinDays?)  → [{ person, nextDate, daysAway }]
 orbit.digest.statusBoard()           → [{ person, status, text, ts }]
 orbit.digest.changeFeed(sinceTs?)    → [{ person, kind, ... , ts }]
 orbit.people.list(filter?)           → Person[]
-orbit.people.get(id)                 → { person, timeline }
+orbit.people.get(id)                 → { person, identities[], timeline }  // identities = the linked cluster (incl. self id)
 orbit.people.setNote(id, text)       → ok        // your CRM note
-orbit.people.link(idA, idB)          → ok        // assert same-human
+orbit.people.link(idA, idB)          → ok        // assert same-human (symmetric, transitive)
+orbit.people.unlink(idA, idB)        → ok        // remove one asserted edge
+orbit.people.linkSuggestions(id?)    → [{ a, b, person, candidate, score, reason }]  // candidates to CONFIRM, never auto-applied
 orbit.people.forget(id)              → ok        // §0.5 hard delete, cascades
 orbit.sources.status()               → [{ plugin, lastRun, lastOk, nPersons }]
 orbit.sources.runNow(plugin)         → triggers an in-process reader
