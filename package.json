@@ -1,7 +1,7 @@
 {
   "name": "nx-orbit",
   "productName": "NX Orbit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local-first dashboard for keeping up with the friends you already have — consent-based, no cloud, no AI-over-people",
   "main": "src/main/index.js",
   "type": "module",
